@@ -25,7 +25,7 @@ Rules:
 - category: exactly one of ${ARTICLE_CATEGORIES.map((c) => `"${c}"`).join(', ')}.
 - georgia_related: true only when the story concerns the country Georgia (Sakartvelo): its economy, institutions, companies, markets or region. False for the US state.
 - chart: optional, otherwise null. Include it only when the items state two to six comparable numbers in one unit (two periods, two companies, shares of a total). Form: {"title":"...","unit":"...","items":[{"label":"...","value":<number>}]}. Every value, and any number inside a label, must appear in the items exactly; never compute, estimate or round a figure. Labels are short. If in doubt, null.
-- used_item_ids: the ids of the items you actually relied on. Use at least one. Do not list an item that is about a different event.
+- used_item_ids: the ids of every item in the cluster that reports this same event (a second outlet's report counts as independent confirmation, so list it even if you did not quote it). Use at least one. Do not list an item that is about a different event.
 - Write in English, even if a source is in Georgian.
 
 ${UNTRUSTED}

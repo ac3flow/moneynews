@@ -24,7 +24,7 @@ import type { Citation } from './scoring';
 
 const MAX_ITEM_AGE_MS = 72 * 3600_000; // ignore very old feed items on ingest
 const POOL_WINDOW_MS = 36 * 3600_000; // how long an unused item stays eligible
-const POOL_LIMIT = 150;
+const POOL_LIMIT = 400; // newest unused items considered for clustering; titles only, so the rows stay small
 const MAX_OFFERS = 3; // times an item may be sent to the LLM without becoming an article
 const MAX_ITEMS_PER_CLUSTER = 6;
 const BASELINE_AGE_MS = 7 * 86_400_000; // first sight of a page feed: mark existing links as old news
@@ -169,8 +169,11 @@ export async function collectStage(ctx: StageCtx, phase = 0): Promise<Record<str
 export async function researchStage(ctx: StageCtx): Promise<Record<string, unknown>> {
   const { env, now, cfg } = ctx;
 
+  // Clustering reads titles only, so the pool query leaves out the (long) snippets; the few items that
+  // end up in a cluster get theirs in one more query below.
   const { results: pool } = await env.DB.prepare(
-    `SELECT * FROM feed_items WHERE article_id IS NULL AND offered_count < ?1 AND published_at >= ?2
+    `SELECT id, source_id, source_name, feed_id, title, url, NULL AS snippet, published_at, fetched_at, via_social, georgia, category_hint, offered_count, article_id
+     FROM feed_items WHERE article_id IS NULL AND offered_count < ?1 AND published_at >= ?2
      ORDER BY published_at DESC LIMIT ?3`,
   )
     .bind(MAX_OFFERS, nowIso(now - POOL_WINDOW_MS), POOL_LIMIT)
@@ -193,6 +196,12 @@ export async function researchStage(ctx: StageCtx): Promise<Record<string, unkno
   const summary = { pool: pool.length, eligibleClusters: clusters.length };
   if (clusters.length === 0) return { ...summary, skipped: 'no cluster can meet the double-sourcing rule yet' };
   if (!ctx.llm) return { ...summary, skipped: 'GEMINI_API_KEY not configured' };
+
+  const { results: snippets } = await env.DB.prepare(`SELECT id, snippet FROM feed_items WHERE id IN (SELECT value FROM json_each(?1))`)
+    .bind(JSON.stringify(clusters.flatMap((c) => c.items.map((i) => i.id))))
+    .all<{ id: string; snippet: string | null }>();
+  const snippetOf = new Map(snippets.map((r) => [r.id, r.snippet]));
+  for (const c of clusters) for (const i of c.items) i.snippet = snippetOf.get(i.id) ?? null;
 
   const payload = {
     clusters: clusters.map((c) => ({

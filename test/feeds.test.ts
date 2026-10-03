@@ -122,3 +122,40 @@ describe('clusterItems', () => {
     expect(clusterItems([])).toEqual([]);
   });
 });
+
+describe('clusterItems on headlines real outlets wrote for the same event', () => {
+  // Word weights depend on the whole pool, so judge pairs inside a realistic pool of unrelated headlines.
+  const FILLER = Array.from({ length: 60 }, (_, i) => `Regional ${['wheat', 'copper', 'lithium', 'cocoa', 'timber'][i % 5]} harvest ${['rises', 'falls'][i % 2]} in district${i}`);
+  const groupsOf = (titles: string[]): string[][] => {
+    const all = [...titles, ...FILLER].map((title, i) => ({ id: String(i), title }));
+    return clusterItems(all)
+      .map((g) => g.map((x) => x.id).filter((id) => Number(id) < titles.length).sort())
+      .filter((g) => g.length > 0);
+  };
+  const together = (a: string, b: string): boolean => groupsOf([a, b]).length === 1;
+
+  it('links outlets that word the same story differently', () => {
+    expect(together('Ethereum Foundation launches zkAPI to let users pay for AI models without revealing identity', 'Ethereum Now Lets You Pay for AI Without Revealing Who You Are')).toBe(true);
+    expect(together('Once a $2 billion Ethereum layer-2, Blast is shutting down after assets plunge 98%', 'Once a $2.3 Billion Network, Ethereum Layer-2 Blast Is Shutting Down')).toBe(true);
+    expect(together('Stripe swallows Parafin', 'Stripe to buy embedded finance platform Parafin')).toBe(true);
+    expect(together('Nubank rejects Monzo takeover talk', 'Nubank halts Monzo acquisition talks after shares plunge')).toBe(true);
+    expect(together('Labor market faltered in September as jobs increased by just 29,000, unemployment rate rose to 4.2%', 'U.S. added just 29,000 jobs in September, with unemployment rate rising to 4.2%')).toBe(true);
+    expect(together('Bitcoin ETFs record $1.2 billion inflows as price tops $120,000', 'Bitcoin ETF inflows reach $1.2 billion, price tops $120,000')).toBe(true);
+  });
+
+  it('folds plurals and thousands separators', () => {
+    expect([...tokens('Bitcoin ETFs add 29,000 jobs')].sort()).toEqual(['29000', 'add', 'bitcoin', 'etf', 'job']);
+  });
+
+  it('does not merge headlines that only share filler words, dates or a generic word', () => {
+    expect(together('The Treasury Department started Trump accounts for 60 million kids', "It's My Birthday and I'll Take Off if I Want To")).toBe(false);
+    expect(together('Media advisory - Justice and Home Affairs Council of 1 and 2 October 2026', 'EBA E-mail alert 2 October, 2026')).toBe(false);
+    expect(together('The Strategy playbook looks different in 2026', 'Sibos 2026: What does a successful ESG strategy look like?')).toBe(false);
+    expect(together('Meta wants your next gadget to be Muse-infused', 'Meta Wants to Run More of Your Marketing, But Should They?')).toBe(false);
+  });
+
+  it('keeps unrelated stories apart in a mixed pool', () => {
+    const g = groupsOf(['Fed holds rates', 'Stripe swallows Parafin', 'Stripe to buy embedded finance platform Parafin', 'Google launches test satellite carrying four TPU chips', 'Peter Thiel buys $130 million Bel-Air estate']);
+    expect(g.sort()).toEqual([['0'], ['1', '2'], ['3'], ['4']].sort());
+  });
+});
