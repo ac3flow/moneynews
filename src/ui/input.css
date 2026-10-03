@@ -2406,11 +2406,19 @@ a.photo-credit:hover {
 }
 .kpi-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 10px;
+  gap: 6px 10px;
   margin-top: 8px;
   min-height: 30px;
+}
+.kpi-foot .spark {
+  margin-left: auto;
+}
+.kpi-foot > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .delta {
   font-size: 12px;
