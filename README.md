@@ -1,8 +1,8 @@
-# IOANE News
+# Money News
 
 Business, technology and Georgia news that is researched, copy-edited, fact-checked and **translated into Georgian**, every five minutes. Every story carries a trust score (0–100), its sources, and a breakdown of how the score was built. The site is Georgian by default, with an English switch.
 
-One Cloudflare Worker (`ioane-news`) serves the site, the API and the pipeline. It replaces the separate `ioane-agent` and `ioane-agent-2` Workers. **To deploy, follow [DEPLOY.md](DEPLOY.md).**
+One Cloudflare Worker (`moneynews`) serves the site, the API and the pipeline. It replaces the separate `ioane-agent` and `ioane-agent-2` Workers. **To deploy, follow [DEPLOY.md](DEPLOY.md).**
 
 ```
  collect ─► Research ─► Copy editor ─► Fact-Checker ─► Georgian ─► Georgian grammar ─► Publish

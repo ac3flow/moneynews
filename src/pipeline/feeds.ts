@@ -12,7 +12,7 @@ export interface RawItem {
   published: string;
 }
 
-export const UA = 'Mozilla/5.0 (compatible; IOANE-brief-agent/1.0)';
+export const UA = 'Mozilla/5.0 (compatible; MoneyNews-agent/1.0)';
 const FETCH_TIMEOUT_MS = 8000;
 // A feed is re-polled every few minutes, so only the newest items can be new. Fewer items = less CPU.
 const MAX_ITEMS_PER_FEED = 12;

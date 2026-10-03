@@ -7,11 +7,11 @@ export const DEFAULT_LANG = 'ka';
 
 export const DICT = {
   ka: {
-    docTitle: 'IOANE News',
+    docTitle: 'Money News',
     docDesc: 'ბიზნესი, ტექნოლოგიები და საქართველო: სიახლეები, რომლებსაც ყოველ ხუთ წუთში ვიკვლევთ, ვასწორებთ და ფაქტებს ვამოწმებთ. თითოეულ სიახლეს აქვს სანდოობის ქულა და წყაროები.',
     skip: 'გადასვლა სიახლეებზე',
     noscript: 'სიახლეების სანახავად ჩართეთ JavaScript.',
-    brandAria: 'IOANE News, მთავარი გვერდი',
+    brandAria: 'Money News, მთავარი გვერდი',
     langAria: 'ენა',
     themeAria: 'ღია და მუქი რეჟიმის გადართვა',
     searchPlaceholder: 'ძიება ამბებში…',
@@ -175,16 +175,16 @@ export const DICT = {
     footTag: 'ბიზნესი, ტექნოლოგიები და საქართველო. ყოველ ხუთ წუთში ვიკვლევთ, ვასწორებთ, ფაქტებს ვამოწმებთ და ქართულად ვთარგმნით.',
     footTopics: 'თემები',
     footPages: 'გვერდები',
-    footCopy: '© {year} IOANE News',
+    footCopy: '© {year} Money News',
     footTime: 'დრო ნაჩვენებია Asia/Tbilisi (GMT+4) ზონაში. ინახება UTC-ში.',
   },
 
   en: {
-    docTitle: 'IOANE News',
+    docTitle: 'Money News',
     docDesc: 'Business, technology and Georgia news, researched, edited and fact-checked every five minutes. Each story carries a trust score and its sources.',
     skip: 'Skip to stories',
     noscript: 'Turn on JavaScript to read the news.',
-    brandAria: 'IOANE News, home',
+    brandAria: 'Money News, home',
     langAria: 'Language',
     themeAria: 'Switch between light and dark mode',
     searchPlaceholder: 'Search stories…',
@@ -348,7 +348,7 @@ export const DICT = {
     footTag: 'Business, technology and Georgia. Researched, edited, fact-checked and translated into Georgian every five minutes.',
     footTopics: 'Topics',
     footPages: 'Pages',
-    footCopy: '© {year} IOANE News',
+    footCopy: '© {year} Money News',
     footTime: 'Times shown in Asia/Tbilisi (GMT+4). Stored in UTC.',
   },
 };

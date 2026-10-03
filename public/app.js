@@ -1,4 +1,4 @@
-// IOANE News front end. No framework, no build step for JS. Hash routes:
+// Money News front end. No framework, no build step for JS. Hash routes:
 //   #/                 front page        #/t/<tab>[?date=&time=]   a list (Top 10, All, Georgia, topics)
 //   #/s/<id>           one whole story   #/about                   how stories are made
 // All story text is written with textContent (never innerHTML): it is LLM-generated from web sources.
@@ -654,7 +654,7 @@ function viewNotFound() {
 
 // ─── chrome: header, nav, footer ────────────────────────────────────────────
 function wordmark(extra = {}) {
-  return h('a', { class: 'wordmark', href: '#/', ...extra }, h('b', { text: 'IOANE' }), h('span', { text: '.News' }));
+  return h('a', { class: 'wordmark', href: '#/', ...extra }, h('b', { text: 'MONEY' }), h('span', { text: '.News' }));
 }
 
 function renderHeader() {
