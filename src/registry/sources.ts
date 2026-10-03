@@ -19,7 +19,7 @@ import type { ArticleCategory } from '../types';
 
 export type SourceCategoryId =
   | 'global_news' | 'ai_tech' | 'education' | 'economics' | 'georgia' | 'investments' | 'crypto'
-  | 'marketing' | 'real_estate' | 'trade' | 'banks' | 'startups' | 'management';
+  | 'marketing' | 'real_estate' | 'trade' | 'banks' | 'startups' | 'management' | 'geopolitics';
 
 export type TierId = 'primary' | 'wire' | 'major' | 'specialist' | 'commentary' | 'unclassified' | 'social';
 
@@ -87,23 +87,40 @@ const DEFS: Def[] = [
   ['Associated Press', WIRE, 'apnews.com', { aliases: ['AP'] }],
 
   // Major financial & business press
-  ['Bloomberg', M, 'bloomberg.com', { aliases: ['Bloomberg Crypto', 'Bloomberg RE', 'Bloomberg Banks', 'Bloomberg Tech'] }],
+  ['Bloomberg', M, 'bloomberg.com', { aliases: ['Bloomberg Crypto', 'Bloomberg RE', 'Bloomberg Banks', 'Bloomberg Tech'], feeds: [
+    rss('https://feeds.bloomberg.com/markets/news.rss', 'investments'), rss('https://feeds.bloomberg.com/business/news.rss', 'global_news'), rss('https://feeds.bloomberg.com/technology/news.rss', 'ai_tech'),
+    rss('https://feeds.bloomberg.com/economics/news.rss', 'economics'), rss('https://feeds.bloomberg.com/politics/news.rss', 'geopolitics'),
+  ] }], // (v) Bloomberg's public section feeds
   ['Financial Times', M, 'ft.com', { aliases: ['FT', 'FT Property'], feeds: [rss('https://www.ft.com/rss/home', 'global_news')] }], // (v)
-  ['Wall Street Journal', M, 'wsj.com', { aliases: ['WSJ'], feeds: [rss('https://feeds.a.dj.com/rss/RSSMarketsMain.xml', 'investments')] }], // (v)
+  ['Wall Street Journal', M, 'wsj.com', { aliases: ['WSJ'], feeds: [
+    rss('https://feeds.a.dj.com/rss/RSSMarketsMain.xml', 'investments'), rss('https://feeds.content.dowjones.io/public/rss/WSJcomUSBusiness', 'global_news'),
+    rss('https://feeds.content.dowjones.io/public/rss/RSSWSJD', 'ai_tech'), rss('https://feeds.content.dowjones.io/public/rss/RSSWorldNews', 'geopolitics'),
+  ] }], // (v)
   ['CNBC', M, 'cnbc.com', { feeds: [rss('https://www.cnbc.com/id/20910258/device/rss/rss.html', 'economics'), rss('https://www.cnbc.com/id/15839069/device/rss/rss.html', 'investments')] }], // (a)
   ['The Economist', M, 'economist.com', { aliases: ['Economist Business'], feeds: [rss('https://www.economist.com/finance-and-economics/rss.xml', 'economics')] }], // (v)
   ['Nikkei Asia', M, 'asia.nikkei.com nikkei.com', { feeds: [rss('https://asia.nikkei.com/rss/feed/nar', 'global_news')] }], // (v)
   ["Barron's", M, 'barrons.com'],
-  ['BBC Business', M, 'bbc.co.uk bbc.com', { feeds: [rss('https://feeds.bbci.co.uk/news/business/rss.xml', 'global_news')] }], // (v)(a)
-  ['NYT Business', M, 'nytimes.com', { feeds: [rss('https://rss.nytimes.com/services/xml/rss/nyt/Business.xml', 'global_news')] }], // (v)
-  ['Guardian Business', M, 'theguardian.com', { feeds: [rss('https://www.theguardian.com/uk/business/rss', 'global_news')] }], // (v)
+  ['BBC News', M, 'bbc.co.uk bbc.com', { aliases: ['BBC Business'], feeds: [rss('https://feeds.bbci.co.uk/news/business/rss.xml', 'global_news'), rss('https://feeds.bbci.co.uk/news/world/rss.xml', 'geopolitics')] }], // (v)(a)
+  ['The New York Times', M, 'nytimes.com', { aliases: ['NYT Business'], feeds: [rss('https://rss.nytimes.com/services/xml/rss/nyt/Business.xml', 'global_news'), rss('https://rss.nytimes.com/services/xml/rss/nyt/World.xml', 'geopolitics')] }], // (v)
+  ['The Guardian', M, 'theguardian.com', { aliases: ['Guardian Business'], feeds: [rss('https://www.theguardian.com/uk/business/rss', 'global_news'), rss('https://www.theguardian.com/world/rss', 'geopolitics')] }], // (v)
+  // Geopolitics and world affairs. Broadcasters and magazines are weighted by analogy with the press tiers;
+  // the foreign ministry and the EU Council are official sources for what they themselves announce. UN News
+  // is the UN's own newsroom, so it counts as major press, not as an independent official check.
+  ['Deutsche Welle', M, 'dw.com', { aliases: ['DW'], feeds: [rss('https://rss.dw.com/rdf/rss-en-all', 'geopolitics')] }], // (v)
+  ['France 24', S, 'france24.com', { feeds: [rss('https://www.france24.com/en/rss', 'geopolitics')] }], // (v)
+  ['Al Jazeera', S, 'aljazeera.com aljazeera.net', { feeds: [rss('https://www.aljazeera.com/xml/rss/all.xml', 'geopolitics')] }], // (v)
+  ['Euronews', S, 'euronews.com', { feeds: [rss('https://www.euronews.com/rss?level=theme&name=news', 'geopolitics')] }], // (v)
+  ['Foreign Policy', S, 'foreignpolicy.com', { feeds: [rss('https://foreignpolicy.com/feed/', 'geopolitics')] }], // (v)
+  ['UN News', M, 'news.un.org', { feeds: [rss('https://news.un.org/feed/subscribe/en/news/all/rss.xml', 'geopolitics')] }], // (v)
+  ['Council of the EU', P, 'consilium.europa.eu', { feeds: [rss('https://www.consilium.europa.eu/en/rss/pressreleases.ashx', 'geopolitics')] }], // (v)
+  ['US State Department', P, 'state.gov', { feeds: [rss('https://www.state.gov/rss-feed/press-releases/feed/', 'geopolitics')] }], // (v)
   ['Fortune', S, 'fortune.com', { feeds: [rss('https://fortune.com/feed/', 'global_news')] }], // (v)
   ['Forbes', C, 'forbes.com', { feeds: [rss('https://www.forbes.com/business/feed/', 'global_news')] }], // (v)
   ['Business Insider', S, 'businessinsider.com', { feeds: [rss('https://www.businessinsider.com/rss', 'global_news')] }], // (v)
   ['MarketWatch', S, 'marketwatch.com', { feeds: [rss('https://feeds.content.dowjones.io/public/rss/mw_topstories', 'investments'), rss('https://feeds.content.dowjones.io/public/rss/mw_marketpulse', 'investments')] }], // (v)(a)
   ['Yahoo Finance', C, 'finance.yahoo.com', { feeds: [rss('https://finance.yahoo.com/news/rssindex', 'investments')] }], // (v)
-  ['Axios', S, 'axios.com', { aliases: ['Axios Pro Rata'] }],
-  ['Semafor Business', S, 'semafor.com'],
+  ['Axios', S, 'axios.com', { aliases: ['Axios Pro Rata'], feeds: [rss('https://api.axios.com/feed/', 'global_news')] }], // (v)
+  ['Semafor', S, 'semafor.com', { aliases: ['Semafor Business'], feeds: [rss('https://www.semafor.com/rss.xml', 'global_news')] }], // (v)
 
   // AI & technology
   ['MIT Tech Review', S, 'technologyreview.com', { feeds: [rss('https://www.technologyreview.com/feed/', 'ai_tech')] }], // (v)
@@ -117,7 +134,7 @@ const DEFS: Def[] = [
   ['Techmeme', N, 'techmeme.com'],
   ['SiliconANGLE', S, 'siliconangle.com', { feeds: [rss('https://siliconangle.com/feed/', 'ai_tech')] }], // (v)
   ['Engadget', S, 'engadget.com', { feeds: [rss('https://www.engadget.com/rss.xml', 'ai_tech')] }], // (v)
-  ['The Information', S, 'theinformation.com'],
+  ['The Information', S, 'theinformation.com', { feeds: [rss('https://www.theinformation.com/feed', 'ai_tech')] }], // (v)
   ['ScienceDaily', C, 'sciencedaily.com'],
   ['Google AI Blog', S, 'blog.google ai.googleblog.com research.google', { feeds: [rss('https://blog.google/technology/ai/rss/', 'ai_tech')] }], // (v)
   ['Microsoft Research Blog', S, 'microsoft.com', { feeds: [rss('https://www.microsoft.com/en-us/research/feed/', 'ai_tech')] }], // (v)
@@ -220,12 +237,12 @@ const DEFS: Def[] = [
   ['Ad Age', S, 'adage.com'],
   ['Adweek', S, 'adweek.com', { feeds: [rss('https://www.adweek.com/feed/', 'marketing')] }], // (v)(a)
   ['Digiday', S, 'digiday.com', { feeds: [rss('https://digiday.com/feed/', 'marketing')] }], // (v)
-  ['Campaign', S, 'campaignlive.com'],
+  ['Campaign', S, 'campaignlive.com campaignlive.co.uk', { feeds: [rss('https://www.campaignlive.com/rss/news', 'marketing')] }], // (v)
   ['The Drum', S, 'thedrum.com'],
   ['SEJ', C, 'searchenginejournal.com'],
   ['SEL', S, 'searchengineland.com', { aliases: ['Search Engine Land'], feeds: [rss('https://searchengineland.com/feed', 'marketing')] }], // (a)
   ['Social Media Examiner', C, 'socialmediaexaminer.com', { feeds: [rss('https://www.socialmediaexaminer.com/feed/', 'marketing')] }], // (v)
-  ['HubSpot', C, 'hubspot.com'],
+  ['HubSpot', C, 'hubspot.com', { feeds: [rss('https://blog.hubspot.com/marketing/rss.xml', 'marketing')] }], // (v)
   ['Think with Google', S, 'thinkwithgoogle.com'],
   ['Meta Business', S, 'about.fb.com business.facebook.com meta.com'],
   ['LinkedIn Marketing', C, 'business.linkedin.com marketing.linkedin.com'],
@@ -264,7 +281,6 @@ const DEFS: Def[] = [
   ['Drewry', S, 'drewry.co.uk'],
   ['CTS', S, 'containerstatistics.com'],
   ['Baltic Exchange', M, 'balticexchange.com'],
-  ["Lloyd's List", S, 'lloydslist.com'],
   ['JOC', S, 'joc.com', { feeds: [rss('https://www.joc.com/rss.xml', 'trade')] }], // (v)
   ['The Loadstar', S, 'theloadstar.com', { feeds: [rss('https://theloadstar.com/feed/', 'trade')] }], // (v)
   ['ShippingWatch', S, 'shippingwatch.com'],
@@ -312,10 +328,145 @@ const DEFS: Def[] = [
   ['Wharton Knowledge', S, 'knowledge.wharton.upenn.edu wharton.upenn.edu'],
   ['Strategy+Business', C, 'strategy-business.com'],
   ['Chief Executive', N, 'chiefexecutive.net'],
-  ['Fast Company', C, 'fastcompany.com'],
+  ['Fast Company', C, 'fastcompany.com', { feeds: [rss('https://www.fastcompany.com/section/innovation/rss', 'startups')] }], // (v)
   ['Inc.', C, 'inc.com'],
   ['Entrepreneur', N, 'entrepreneur.com'],
   ['Seeking Alpha', N, 'seekingalpha.com'],
+
+  // ── Added from the owner's source list (October 2026) ──────────────────────────────────────────────
+  // Feeds marked (v) answered with parseable items when probed on 2026-10-03. Weights follow the tiers above by
+  // analogy: news sites and trade press 3.5, think tanks and company blogs 3.0, newsletters and how-to blogs 2.5.
+  // Entries without a feed could not be polled (no public feed, or the site refuses automated requests); they
+  // still carry a weight, so a citation of them is judged correctly.
+  // AI & technology
+  ['The Decoder', S, 'the-decoder.com', { feeds: [rss('https://the-decoder.com/feed/', 'ai_tech')] }], // (v)
+  ['404 Media', S, '404media.co', { feeds: [rss('https://www.404media.co/rss/', 'ai_tech')] }], // (v)
+  ['Analytics Insight', N, 'analyticsinsight.net', { feeds: [rss('https://www.analyticsinsight.net/feed', 'ai_tech')] }], // (v)
+  ['Data Center Knowledge', S, 'datacenterknowledge.com', { feeds: [rss('https://www.datacenterknowledge.com/rss.xml', 'ai_tech')] }], // (v)
+  ['EFF Deeplinks', C, 'eff.org', { feeds: [rss('https://www.eff.org/rss.xml', 'ai_tech')] }], // (v)
+  ['InfoWorld', S, 'infoworld.com', { feeds: [rss('https://www.infoworld.com/feed/', 'ai_tech')] }], // (v)
+  ['Network World', S, 'networkworld.com', { feeds: [rss('https://www.networkworld.com/feed/', 'ai_tech')] }], // (v)
+  ['Platformer', N, 'platformer.news', { feeds: [rss('https://www.platformer.news/rss/', 'ai_tech')] }], // (v)
+  ['Unite.AI', C, 'unite.ai'],
+  ['AI News', S, 'artificialintelligence-news.com'],
+  ['Schneier on Security', N, 'schneier.com'],
+  ['DataCamp', N, 'datacamp.com'],
+  ['Protocol', C, 'protocol.com'],
+  // Crypto
+  ['BeInCrypto', C, 'beincrypto.com', { feeds: [rss('https://beincrypto.com/feed', 'crypto')] }], // (v)
+  ['Bitcoin Magazine', S, 'bitcoinmagazine.com', { feeds: [rss('https://bitcoinmagazine.com/feed', 'crypto')] }], // (v)
+  ['CoinGape', C, 'coingape.com', { feeds: [rss('https://coingape.com/feed/', 'crypto')] }], // (v)
+  ['Crypto Briefing', C, 'cryptobriefing.com', { feeds: [rss('https://cryptobriefing.com/feed/', 'crypto')] }], // (v)
+  ['CryptoPotato', C, 'cryptopotato.com', { feeds: [rss('https://cryptopotato.com/feed/', 'crypto')] }], // (v)
+  ['CryptoSlate', S, 'cryptoslate.com', { feeds: [rss('https://cryptoslate.com/feed/', 'crypto')] }], // (v)
+  ['Bitcoin.com News', C, 'news.bitcoin.com bitcoin.com', { feeds: [rss('https://news.bitcoin.com/feed/', 'crypto')] }], // (v)
+  ['The Defiant', S, 'thedefiant.io', { feeds: [rss('https://thedefiant.io/feed', 'crypto')] }], // (v)
+  ['U.Today', C, 'u.today', { feeds: [rss('https://u.today/rss', 'crypto')] }], // (v)
+  ['Finbold', C, 'finbold.com', { feeds: [rss('https://finbold.com/feed/organic/', 'crypto')] }], // (v)
+  ['Coin Bureau', C, 'coinbureau.com'],
+  ['Bankless', N, 'banklesshq.com'],
+  ['TokenInsight', C, 'tokeninsight.com'],
+  ['Pantera Capital', N, 'panteracapital.com'],
+  ['Paradigm', N, 'paradigm.xyz'],
+  // Economics, business, markets
+  ['Bruegel', C, 'bruegel.org', { feeds: [rss('https://www.bruegel.org/rss.xml', 'economics')] }], // (v)
+  ['Council on Foreign Relations', C, 'cfr.org', { aliases: ['CFR'], feeds: [rss('https://www.cfr.org/feed', 'geopolitics')] }], // (v)
+  ['City AM', S, 'cityam.com', { feeds: [rss('https://www.cityam.com/feed/', 'economics')] }], // (v)
+  ['Euromoney', S, 'euromoney.com', { feeds: [rss('https://www.euromoney.com/feed', 'economics')] }], // (v)
+  ['InvestingLive', S, 'investinglive.com forexlive.com', { aliases: ['ForexLive'], feeds: [rss('https://investinglive.com/feed', 'investments')] }], // (v)
+  ['Mining.com', S, 'mining.com', { feeds: [rss('https://www.mining.com/feed', 'economics')] }], // (v)
+  ['OilPrice.com', S, 'oilprice.com', { feeds: [rss('https://oilprice.com/rss.xml', 'economics')] }], // (v)
+  ['Project Syndicate', N, 'project-syndicate.org', { feeds: [rss('https://www.project-syndicate.org/rss', 'economics')] }], // (v)
+  ['The Motley Fool', N, 'fool.com'],
+  ['Politico', M, 'politico.com politico.eu'],
+  ['Vox', S, 'vox.com'],
+  ['Quartz', S, 'qz.com quartz.com'],
+  ['Institutional Investor', S, 'institutionalinvestor.com'],
+  ['Pensions & Investments', S, 'pionline.com pensionsinvestments.com'],
+  ['AM Best', M, 'ambest.com'],
+  ['Kitco', S, 'kitco.com'],
+  ['Commodity.com', N, 'commodity.com'],
+  // Marketing and advertising
+  ['Backlinko', N, 'backlinko.com', { feeds: [rss('https://backlinko.com/blog/feed', 'marketing')] }], // (v)
+  ['Chief Marketer', S, 'chiefmarketer.com', { feeds: [rss('https://www.chiefmarketer.com/feed', 'marketing')] }], // (v)
+  ['Convince & Convert', N, 'convinceandconvert.com', { feeds: [rss('https://www.convinceandconvert.com/feed', 'marketing')] }], // (v)
+  ['LBB Online', S, 'lbbonline.com littleblackbook.com', { aliases: ['Little Black Book'], feeds: [rss('https://lbbonline.com/news/feed', 'marketing')] }], // (v)
+  ['MarTech', S, 'martech.org marketingland.com', { aliases: ['Marketing Land'], feeds: [rss('https://martech.org/feed', 'marketing')] }], // (v)
+  ['Neil Patel', N, 'neilpatel.com', { feeds: [rss('https://neilpatel.com/blog/feed', 'marketing')] }], // (v)
+  ['Sprout Social Insights', N, 'sproutsocial.com', { feeds: [rss('https://sproutsocial.com/insights/feed/', 'marketing')] }], // (v)
+  ['AdExchanger', S, 'adexchanger.com', { feeds: [rss('https://www.adexchanger.com/feed/', 'marketing')] }], // (v)
+  ['WordStream', N, 'wordstream.com'],
+  ['MarketingProfs', S, 'marketingprofs.com'],
+  ['Media Life Magazine', S, 'medialifemagazine.com'],
+  ['MediaPost', S, 'mediapost.com'],
+  ['AdContrarian', N, 'adcontrarian.com'],
+  ['Creative Review', S, 'creativereview.co.uk'],
+  ['Ad Manager Blog', N, 'admanagerblog.com'],
+  // Real estate
+  ['Commercial Observer', S, 'commercialobserver.com', { feeds: [rss('https://commercialobserver.com/feed/', 'real_estate')] }], // (v)
+  ['Real Estate Weekly', S, 'rew-online.com', { aliases: ['REW'], feeds: [rss('https://rew-online.com/feed', 'real_estate')] }], // (v)
+  ['Urbanize', S, 'urbanize.city', { feeds: [rss('https://urbanize.city/rss.xml', 'real_estate')] }], // (v)
+  ['ApartmentGuide', N, 'apartmentguide.com', { feeds: [rss('https://www.apartmentguide.com/blog/feed/', 'real_estate')] }], // (v)
+  ['BiggerPockets', N, 'biggerpockets.com', { feeds: [rss('https://www.biggerpockets.com/blog/feed', 'real_estate')] }], // (v)
+  ['Inman', S, 'inman.com', { feeds: [rss('https://www.inman.com/feed', 'real_estate')] }], // (v)
+  ['Multifamily Executive', S, 'multifamilyexecutive.com', { feeds: [rss('https://www.multifamilyexecutive.com/rss.xml', 'real_estate')] }], // (v)
+  ['Propmodo', S, 'propmodo.com', { feeds: [rss('https://propmodo.com/feed/', 'real_estate')] }], // (v)
+  ['RentCafe', N, 'rentcafe.com', { feeds: [rss('https://www.rentcafe.com/blog/feed/', 'real_estate')] }], // (v)
+  ['Commercial Property Executive', S, 'cpexecutive.com'],
+  ['Curbed', S, 'curbed.com'],
+  ['Mansion Global', S, 'mansionglobal.com'],
+  ['Luxury Portfolio', N, 'luxuryportfolio.com'],
+  ['PropTech Insider', N, 'proptechinsider.com'],
+  ['Office Building News', N, 'officebuildingnews.com'],
+  ['Retail Traffic', S, 'retailtrafficnews.com'],
+  ['Hotel News Now', S, 'hotelnewsnow.com'],
+  ['Rentometer', N, 'rentometer.com'],
+  ['Real Estate Investor', N, 'realestateinvestor.com'],
+  ['REI Club', N, 'reiclub.com'],
+  // Global trade, supply chains, commodities, macro research
+  ['Capital Economics', C, 'capitaleconomics.com', { feeds: [rss('https://www.capitaleconomics.com/rss.xml', 'economics')] }], // (v)
+  ['Oxford Economics', C, 'oxfordeconomics.com', { feeds: [rss('https://www.oxfordeconomics.com/feed/', 'economics')] }], // (v)
+  ['Trade Finance Global', S, 'tradefinanceglobal.com', { feeds: [rss('https://www.tradefinanceglobal.com/feed/', 'trade')] }], // (v)
+  ['US Trade.gov', P, 'trade.gov export.gov', { aliases: ['Export.gov'] }],
+  ['Global Trade Magazine', S, 'globaltrademag.com'],
+  ['World Trade Magazine', S, 'worldtrademag.com'],
+  ['Inbound Logistics', S, 'inboundlogistics.com'],
+  ['Logistics Management', S, 'logisticsmgmt.com'],
+  ["Lloyd's List", S, 'lloydslist.com'],
+  ['Argus Media', S, 'argusmedia.com'],
+  ['Fastmarkets', S, 'fastmarkets.com'],
+  ['Commodities Now', N, 'commodities-now.com'],
+  ['IHS Markit', M, 'ihsmarkit.com'],
+  ['TradeGecko', N, 'tradegecko.com'],
+  ['Crux Investor', N, 'cruxinvestor.com'],
+  // VC, startups, innovation
+  ['Continuations', N, 'continuations.com', { feeds: [rss('https://continuations.com/feed', 'startups')] }], // (v)
+  ['Startup Daily', S, 'startupdaily.net', { feeds: [rss('https://www.startupdaily.net/feed/', 'startups')] }], // (v)
+  ['Stratechery', N, 'stratechery.com', { feeds: [rss('https://stratechery.com/feed', 'startups')] }], // (v)
+  ['The Generalist', N, 'generalist.com', { feeds: [rss('https://www.generalist.com/feed', 'startups')] }], // (v)
+  ["Lenny's Newsletter", N, 'lennysnewsletter.com', { feeds: [rss('https://www.lennysnewsletter.com/feed', 'startups')] }], // (v)
+  ['Not Boring', N, 'notboring.co', { feeds: [rss('https://www.notboring.co/feed', 'startups')] }], // (v)
+  ['Benedict Evans', N, 'ben-evans.com', { feeds: [rss('https://www.ben-evans.com/benedictevans?format=rss', 'startups')] }], // (v)
+  ['DealStreetAsia', S, 'dealstreetasia.com'],
+  ['Both Sides of the Table', N, 'bothsidesofthetable.com'],
+  ['Paul Graham', N, 'paulgraham.com'],
+  ['Elad Gil', N, 'eladgil.com'],
+  ['Mogul', N, 'mogul.co'],
+  // Georgia. Outlets without a feed are read from their news listing (kind 'page'); Georgian-language ones are
+  // marked and clustered by Georgian word roots.
+  ['Netgazeti', S, 'netgazeti.ge', { georgia: true, feeds: [rss('https://netgazeti.ge/feed/', 'georgia')] }], // (v) Georgian
+  ['Interpressnews', S, 'interpressnews.ge', { georgia: true, feeds: [page('https://www.interpressnews.ge/en/', '^/en/article/\\d+-', 'georgia')] }], // (v) English listing
+  ['Georgia Today', S, 'georgiatoday.ge', { georgia: true, feeds: [page('https://georgiatoday.ge/category/business/', '^/[a-z0-9-]{25,}/$', 'georgia')] }], // (v)
+  ['Imedi News', C, 'imedinews.ge', { georgia: true, feeds: [page('https://imedinews.ge/ge/ekonomika', '^/ge/ekonomika/\\d+/', 'georgia')] }], // (v) Georgian; pro-government broadcaster
+  ['Kvira', C, 'kvira.ge', { georgia: true, feeds: [page('https://www.kvira.ge/', '^/\\d{6,}$', 'georgia')] }], // (v) Georgian
+  ['Liberali', S, 'liberali.ge', { georgia: true, feeds: [page('https://www.liberali.ge/', '^/news/view/\\d+/', 'georgia')] }], // (v) Georgian
+  ['Agenda.ge', C, 'agenda.ge', { georgia: true }],
+  ['BM.ge', S, 'bm.ge', { georgia: true, aliases: ['Business Media Georgia'] }],
+  ['1TV', C, '1tv.ge', { georgia: true, aliases: ['Georgian Public Broadcaster'] }],
+  ['Rustavi 2', C, 'rustavi2.ge rustavi2.com.ge', { georgia: true }],
+  ['Tabula', S, 'tabula.ge', { georgia: true }],
+  ['Presa', C, 'presa.ge', { georgia: true }],
+  ['Business Media', S, 'businessmedia.ge', { georgia: true }],
 
   // Social signals: discovery only, never sufficient on their own.
   ['Hacker News', SOCIAL, 'news.ycombinator.com', { social: true, feeds: [rss('https://news.ycombinator.com/rss')] }], // (v)
@@ -356,6 +507,7 @@ export const SOURCE_CATEGORIES: SourceCategory[] = [
   { id: 'trade', label: 'Global Trade & Supply Chains', articleCategory: 'Global Trade', sources: ['WTO', 'UN Comtrade', 'UNCTAD', 'ITC', 'WCO', 'World Bank Trade', 'OECD Trade', 'Eurostat Trade', 'US Census', 'US ITC', 'IMF DOTS', 'Freightos', 'Drewry', 'S&P Global Supply Chain', 'CTS', 'Baltic Exchange', "Lloyd's List", 'JOC', 'The Loadstar', 'ShippingWatch'] },
   { id: 'banks', label: 'Banks & Financial Institutions', articleCategory: 'Economics', sources: ['BIS', 'FSB', 'IMF', 'Fed', 'ECB', 'BoE', 'NBG', 'EBA', 'OCC', 'FDIC', 'Basel Committee', 'Reuters Banks', 'Bloomberg Banks', 'American Banker', 'The Banker', 'Risk.net', 'S&P Banking', "Moody's Banking", 'Fitch Banking', 'Coalition Greenwich'] },
   { id: 'startups', label: 'Startups, VC & Companies', articleCategory: 'VC & Startups', sources: ['TechCrunch Startups', 'Crunchbase News', 'Sifted', 'EU-Startups', 'VentureBeat', 'The Information', 'StrictlyVC', 'Axios Pro Rata', 'Bloomberg Tech', 'PitchBook', 'CB Insights', 'Dealroom', 'Tracxn', 'Carta', 'YC', 'Techstars', 'Sequoia', 'a16z', 'First Round', 'HBR'] },
+  { id: 'geopolitics', label: 'Geopolitics & World Affairs', articleCategory: 'Geopolitics', sources: ['BBC News', 'The Guardian', 'The New York Times', 'Deutsche Welle', 'France 24', 'Al Jazeera', 'Euronews', 'Foreign Policy', 'UN News', 'Council of the EU', 'US State Department'] },
   { id: 'management', label: 'Management & Leadership', articleCategory: 'General', sources: ['HBR', 'MIT Sloan', 'McKinsey Insights', 'Bain Insights', 'BCG', 'Deloitte Insights', 'PwC Insights', 'Accenture Research', 'Gartner', 'SHRM', 'Stanford GSB', 'LBS Review', 'INSEAD Knowledge', 'Wharton Knowledge', 'Strategy+Business', 'Economist Business', 'Chief Executive', 'Fast Company', 'Inc.', 'Entrepreneur'] },
 ];
 

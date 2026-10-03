@@ -24,7 +24,7 @@ Two modes, chosen with `PIPELINE_MODE`:
 |---|---|---|
 | Triggers | 5 crons, one minute apart | 1 cron, `*/5 * * * *` |
 | Each 5-minute window | `:00` collect · `:01` research + edit · `:02` fact-check + translate · `:03` Georgian grammar + publish · `:04` collect | everything, in order |
-| Sources searched per window | 50 of 75 (two collects of 25); all 75 every 15 minutes | all 75 every 5 minutes (`FEEDS_PER_RUN=80`) |
+| Sources searched per window | about 46 of 159 (two collects of about 23); every feed about every 17 minutes | all 159 every 5 minutes (`FEEDS_PER_RUN=170`) |
 | Why | Free allows 50 outbound requests and about 10 ms of CPU **per invocation**, so work is split across invocations | Paid raises both limits a hundredfold |
 
 An article drafted at `:01` is published at `:03`. The five expressions in `wrangler.jsonc` must match `STAGED_CRONS` in `src/pipeline/run.ts` (a test checks that every stage is covered). Free accounts allow five cron triggers in total, so disable the crons on the old agent Workers first.
@@ -47,6 +47,7 @@ A news-site layout in green (light and dark): header with search and the EN/ქ�
 - **Whole stories.** Click any headline to open the full story: what happened, why it matters, key figures and dates, who is affected, risks and uncertainty. Every list row also shows its sources.
 - **Source links.** Each story lists every source it was built from, with the publisher, its kind (official, wire, major press, ...), its credibility weight, and a link that opens the original article in a new tab.
 - **Charts.** The front page has an "In numbers" section (stories per hour over the last 24 hours, stories per topic, trust-score spread, kinds of sources). Each story page has a visual summary: key-number tiles from its figures, a bar chart when the sources state two or more comparable numbers, the trust-score breakdown, and a timeline of when each source reported.
+- **Pictures.** A story shows the picture that came with its most credible source (`media:content`, `media:thumbnail`, an image enclosure, or the first `<img>` in the feed item), hotlinked from the publisher, with the publisher credited and linked under it. When none of a story's sources supplied one, it shows a public-domain or CC0 photograph from Wikimedia Commons chosen by topic (Georgian stories draw from a Georgia set), always the same photo for the same story, credited to its photographer. The 46 photographs are listed in `src/stock-photos.ts`; nothing is copied into the repository. `SOURCE_PHOTOS` controls it: `all` (default), `primary` (pictures only from official sources) or `off` (stock photos only). Publishers keep the copyright in their pictures, so the credit and link are not a licence: if a publisher objects, or you want no risk at all, set `SOURCE_PHOTOS` to `off`. Browsers fetch the pictures directly, so the publisher's server sees the visitor's IP address; the pages send `referrerpolicy="no-referrer"` and the CSP allows `https:` images for this reason.
 - **Search by time.** The time field is `<input type="time" step="300">`: pick a day and a 5-minute slot (Tbilisi time), or only a slot to match any day.
 - **Text search.** `/` (or the magnifier) searches headlines and summaries in the current language.
 
@@ -62,9 +63,10 @@ The bar chart is optional and checked in code: the Research agent proposes it, a
 | `GEMINI_MODEL_KA` | var | `GEMINI_MODEL` | Optional stronger model for translate + Georgian grammar check. |
 | `GEMINI_BASE_URL` | var | Google's endpoint | Route calls through a gateway (e.g. Cloudflare AI Gateway). |
 | `PIPELINE_MODE` | var | `staged` | `staged` (Free) or `single` (Paid). |
-| `FEEDS_PER_RUN` | var | `30` | Sources per collect. Sources are split into `ceil(75 / FEEDS_PER_RUN)` groups visited in turn: `30` → 3 groups of 25. Use `80` with `single` on Paid. |
+| `FEEDS_PER_RUN` | var | `25` | Sources per collect. Feeds are split into `ceil(159 / FEEDS_PER_RUN)` groups visited in turn: `25` → 7 groups of about 23. Use `170` with `single` on Paid. |
 | `MAX_ARTICLES_PER_RUN` | var | `3` | New drafts per research run, and the batch size of every later stage. |
 | `PUBLISH_THRESHOLD` | var | `60` | Minimum trust score to publish. |
+| `SOURCE_PHOTOS` | var | `all` | `all`: show the picture a source supplied. `primary`: only from official sources. `off`: stock photos only. |
 
 **Per-invocation budget (Free allows 50 outbound requests and 50 D1 queries).** Measured in the test suite with three stories moving through every stage: a collect makes 25 outbound requests and 6 D1 calls; the busiest invocation (research + edit) makes 2 Gemini calls and 19 D1 calls (26 counting each statement inside a batch). A stage makes one Gemini call, or two if the first response fails validation.
 
@@ -91,9 +93,12 @@ Source weights live in `src/registry/sources.ts` (5.0 primary/official, 4.5 wire
 
 ## Sources
 
-The registry holds all 13 categories from the brief. Only sources with a working public feed are **polled**; the rest still count when they are cited. Not polled (no public feed): Reuters, AP, Bloomberg, and most paywalled or bot-blocked sites. 75 feeds are polled (71 RSS, 4 scraped listings). At most 12 newest items are read per feed.
+The registry holds the 13 categories from the brief plus Geopolitics: 332 sources, 145 of them polled through 159 feeds (150 RSS or Atom, 9 scraped news listings). The rest have no public feed, or the site refuses automated requests; they still carry a weight, so a citation of them is judged correctly. Reuters has no public feed; Bloomberg and the Wall Street Journal are read through their public section feeds. At most 12 newest items are read per feed.
 
 - **Georgia.** NBG, GeoStat, the Ministry of Finance and the Georgian Stock Exchange publish no RSS, so their HTML news listings are read by link pattern (`kind: 'page'`). The first time a listing is seen, its existing links are recorded as old news so a backlog does not flood the pool. The Revenue Service has no scrapeable listing and is weight-only.
+- **Georgian outlets.** Netgazeti has a feed. Interpressnews (English edition), Georgia Today, Imedi, Kvira and Liberali have none, so their news listings are read by link pattern. Georgian-language headlines are matched across outlets by word root, so two Georgian outlets covering the same event can corroborate each other. Tabula, BM.ge, 1TV, Rustavi 2, Agenda.ge, Presa and Business Media refuse automated requests or have no feed, so they are weight-only. The three broadcasters (Imedi, 1TV, Rustavi 2) are weighted 3.0 (commentary): their coverage can be partisan.
+- **Geopolitics.** Eleven feeds feed the topic: the BBC, Guardian, New York Times and WSJ/Bloomberg world and politics sections, Deutsche Welle, France 24, Al Jazeera, Euronews, Foreign Policy, the Council on Foreign Relations, UN News, the Council of the EU and the US State Department. The Research agent attributes every claim to whoever made it.
+- **Weights for sources the brief did not place** follow the tiers by analogy: news sites and trade press 3.5, think tanks and company blogs 3.0, newsletters and how-to blogs 2.5. Change a number in `src/registry/sources.ts` and scoring follows.
 - **Additions beyond the brief:** Civil.ge (Georgian press, so official Georgian data has independent corroboration), and the trade feeds agent 2 already polled (Marketing Dive, HousingWire, Supply Chain Dive, FreightWaves, Banking Dive, Finextra, Realtor.com).
 - **Not polled on purpose:** the general Nature and Science feeds. They carry essays and non-business science that would pass the primary-source rule and crowd out news.
 - A dead or blocked feed never fails a run: it is logged to `pipeline_events` (`stage = 'feed'`) and counted in `/api/status`.
@@ -102,7 +107,7 @@ The registry holds all 13 categories from the brief. Only sources with a working
 
 | Endpoint | |
 |---|---|
-| `GET /api/articles?lang=&tab=&date=&time=&q=&limit=&before=` | `lang`: `en` (default) or `ka`. In `ka`, only stories whose Georgian version passed the grammar checker are listed, with the Georgian text. `tab`: `top10`, `all`, `georgia`, `ai-tech`, `economics`, `crypto`, `marketing`, `real-estate`, `global-trade`, `vc-startups`. `top10` is `trust_score DESC LIMIT 10`. `time=HH:MM` matches the 5-minute slot `[HH:MM, HH:MM+5)` in Asia/Tbilisi, on any day, or on `date=YYYY-MM-DD` if given. `q` (2+ characters) searches headline and summary (the Georgian text for `lang=ka`). Each source has `tier`: `primary`, `wire`, `major`, `specialist`, `commentary`, `unclassified` or `social`. Timestamps in the response are UTC. |
+| `GET /api/articles?lang=&tab=&date=&time=&q=&limit=&before=` | `lang`: `en` (default) or `ka`. In `ka`, only stories whose Georgian version passed the grammar checker are listed, with the Georgian text. `tab`: `top10`, `all`, `georgia`, `ai-tech`, `economics`, `crypto`, `marketing`, `real-estate`, `global-trade`, `geopolitics`, `vc-startups`. `top10` is `trust_score DESC LIMIT 10`. `time=HH:MM` matches the 5-minute slot `[HH:MM, HH:MM+5)` in Asia/Tbilisi, on any day, or on `date=YYYY-MM-DD` if given. `q` (2+ characters) searches headline and summary (the Georgian text for `lang=ka`). Each source has `tier`: `primary`, `wire`, `major`, `specialist`, `commentary`, `unclassified` or `social`. Each story has an `image`: `{url, credit, credit_url, kind}` where `kind` is `source` or `stock`. Timestamps in the response are UTC. |
 | `GET /api/articles/:id?lang=` | One story plus its trust breakdown, its optional `chart` (`{title, unit, items:[{label, value}]}`) and a `timeline` of the cited items (`{name, url, at}`, oldest first). |
 | `GET /api/stats` | Numbers for the front-page charts: `perHour` (24 buckets), `byCategory`, `trustSpread`, `sourceTiers`, `avgTrust`. |
 | `GET /api/slots?date=&tab=` | Stories per 5-minute slot (feeds the tape in the UI). |
@@ -114,7 +119,7 @@ All stored timestamps are UTC ISO-8601. The browser renders them in `Asia/Tbilis
 
 ## Database
 
-`schema.sql` holds the `articles` table exactly as specified, plus operational tables: `article_translations` (the Georgian text, one row per article and language), `article_charts` (the optional bar chart, one row per article and language), `feed_items` (the rolling pool of collected items), `pipeline_runs` (also the run lock, one live run per scope) and `pipeline_events` (audit trail). The Worker creates these tables itself on first use (`src/db-init.ts`, generated from `schema.sql` by `npm run build`), so a fresh database needs no setup. It is safe to re-run. If a different `articles` table already exists in the target database, `CREATE TABLE IF NOT EXISTS` will not change it, so use a fresh database.
+`schema.sql` holds the `articles` table exactly as specified, plus operational tables: `article_translations` (the Georgian text, one row per article and language), `article_charts` (the optional bar chart, one row per article and language), `feed_items` (the rolling pool of collected items), `item_images` and `article_images` (the picture a feed item came with, and the one a story shows with its credit), `pipeline_runs` (also the run lock, one live run per scope) and `pipeline_events` (audit trail). The Worker creates these tables itself on first use (`src/db-init.ts`, generated from `schema.sql` by `npm run build`), so a fresh database needs no setup. It is safe to re-run. If a different `articles` table already exists in the target database, `CREATE TABLE IF NOT EXISTS` will not change it, so use a fresh database.
 
 Articles, translations and feed items are never deleted. Run and event logs older than 30 days are trimmed daily. Drafts not published within 24 hours are rejected as stale.
 

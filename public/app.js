@@ -13,9 +13,9 @@ const POLL_MS = 30_000;
 const DELAYED_AFTER_MS = 12 * 60_000;
 const PAGE = 20;
 
-const FALLBACK_TABS = ['top10', 'all', 'georgia', 'ai-tech', 'economics', 'crypto', 'marketing', 'real-estate', 'global-trade', 'vc-startups'].map((id) => ({ id }));
-const TAB_OF_CATEGORY = { 'AI & Tech': 'ai-tech', Economics: 'economics', Crypto: 'crypto', Marketing: 'marketing', 'Real Estate': 'real-estate', 'Global Trade': 'global-trade', 'VC & Startups': 'vc-startups' };
-const CATEGORY_ORDER = ['AI & Tech', 'Economics', 'Crypto', 'Marketing', 'Real Estate', 'Global Trade', 'VC & Startups', 'General'];
+const FALLBACK_TABS = ['top10', 'all', 'georgia', 'ai-tech', 'economics', 'crypto', 'marketing', 'real-estate', 'global-trade', 'geopolitics', 'vc-startups'].map((id) => ({ id }));
+const TAB_OF_CATEGORY = { 'AI & Tech': 'ai-tech', Economics: 'economics', Crypto: 'crypto', Marketing: 'marketing', 'Real Estate': 'real-estate', 'Global Trade': 'global-trade', Geopolitics: 'geopolitics', 'VC & Startups': 'vc-startups' };
+const CATEGORY_ORDER = ['AI & Tech', 'Economics', 'Crypto', 'Marketing', 'Real Estate', 'Global Trade', 'Geopolitics', 'VC & Startups', 'General'];
 
 const $ = (id) => document.getElementById(id);
 

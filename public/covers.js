@@ -28,6 +28,7 @@ const HUE = {
   re: ['#052920', '#1a9d82'],
   trade: ['#032a2b', '#0f9ba0'],
   startup: ['#0b2b18', '#4cbf6b'],
+  geo: ['#042a24', '#1c9c8c'],
   fin: ['#052b21', '#17a67d'],
 };
 
@@ -38,6 +39,7 @@ export const MOTIF_OF = {
   Marketing: 'mkt',
   'Real Estate': 're',
   'Global Trade': 'trade',
+  Geopolitics: 'geo',
   'VC & Startups': 'startup',
   General: 'fin',
 };
@@ -145,6 +147,25 @@ const MOTIF = {
       const y1 = cy - 60 + r() * 120;
       o += `<path d="M${f0(x0)} ${f0(y0)}Q${f0((x0 + x1) / 2)} ${f0(Math.min(y0, y1) - 60)} ${f0(x1)} ${f0(y1)}" fill="none" stroke="#fff" stroke-opacity=".75" stroke-width="1.6" stroke-dasharray="5 5"/><circle cx="${f0(x0)}" cy="${f0(y0)}" r="4" fill="#fff"/><circle cx="${f0(x1)}" cy="${f0(y1)}" r="4" fill="#fff"/>`;
     }
+    return o;
+  },
+  geo(r) {
+    // a globe with meridians and parallels, a few places marked and joined by dashed routes
+    const cx = 240 + r() * 40;
+    const cy = 125;
+    const R = 105;
+    let o = `<circle cx="${f0(cx)}" cy="${f0(cy)}" r="${R}" fill="#fff" fill-opacity=".06" stroke="#fff" stroke-opacity=".5" stroke-width="1.5"/>`;
+    for (const dy of [-70, -35, 0, 35, 70]) {
+      const half = Math.sqrt(R * R - dy * dy);
+      o += `<path d="M${f0(cx - half)} ${f0(cy + dy)}H${f0(cx + half)}" stroke="#fff" stroke-opacity=".2"/>`;
+    }
+    for (const k of [0.25, 0.55, 0.85]) o += `<ellipse cx="${f0(cx)}" cy="${f0(cy)}" rx="${f0(R * k)}" ry="${R}" fill="none" stroke="#fff" stroke-opacity=".22"/>`;
+    const pins = Array.from({ length: 4 }, () => [cx + (r() - 0.5) * 1.5 * R, cy + (r() - 0.5) * 1.3 * R]);
+    pins.forEach((p, i) => {
+      const q = pins[i + 1];
+      if (q) o += `<path d="M${f0(p[0])} ${f0(p[1])}Q${f0((p[0] + q[0]) / 2)} ${f0(Math.min(p[1], q[1]) - 40)} ${f0(q[0])} ${f0(q[1])}" fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="1.6" stroke-dasharray="5 5"/>`;
+    });
+    for (const p of pins) o += `<circle cx="${f0(p[0])}" cy="${f0(p[1])}" r="16" fill="none" stroke="#fff" stroke-opacity=".35"/><circle cx="${f0(p[0])}" cy="${f0(p[1])}" r="5.5" fill="#fff"/>`;
     return o;
   },
   startup(r) {

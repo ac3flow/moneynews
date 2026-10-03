@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { handleApi, parseFigures, parseListQuery } from '../src/api';
-import { insertArticle, insertTranslation, makeEnv } from './helpers';
+import { STOCK_PHOTOS, stockPhotoFor } from '../src/stock-photos';
+import { insertArticle, insertImage, insertTranslation, makeEnv } from './helpers';
 
 type Env = ReturnType<typeof makeEnv>;
 
@@ -258,7 +259,7 @@ describe('other endpoints', () => {
     const { body } = await get(env, '/api/meta');
     expect(body.counts).toMatchObject({ total: 2, georgia: 1 });
     expect(body.counts.byCategory.Crypto).toBe(2);
-    expect(body.tabs.map((t: any) => t.label)).toEqual(['Top 10', 'All', 'Georgia Focus', 'AI & Tech', 'Economics', 'Crypto', 'Marketing', 'Real Estate', 'Global Trade', 'VC & Startups']);
+    expect(body.tabs.map((t: any) => t.label)).toEqual(['Top 10', 'All', 'Georgia Focus', 'AI & Tech', 'Economics', 'Crypto', 'Marketing', 'Real Estate', 'Global Trade', 'Geopolitics', 'VC & Startups']);
     expect(Date.parse(body.nextRunAt) % 300_000).toBe(0);
     expect(Date.parse(body.nextRunAt)).toBeGreaterThan(Date.parse(body.now));
     expect(body.lastPublishedAt).toBe('2026-10-03T11:00:00.000Z');
@@ -346,8 +347,9 @@ describe('GET /api/articles/:id: chart and reporting timeline', () => {
   it('returns the chart in the requested language', async () => {
     const env = makeEnv();
     seed(env);
-    expect((await get(env, '/api/articles/c1?lang=en')).body.chart).toEqual(CHART);
-    expect((await get(env, '/api/articles/c1?lang=ka')).body.chart).toEqual(KA_CHART);
+    // a chart stored before chart types existed reads as a bar chart
+    expect((await get(env, '/api/articles/c1?lang=en')).body.chart).toEqual({ ...CHART, type: 'bar' });
+    expect((await get(env, '/api/articles/c1?lang=ka')).body.chart).toEqual({ ...KA_CHART, type: 'bar' });
   });
 
   it('has no chart (null) when none was stored, and ignores a stored chart that no longer parses', async () => {
@@ -434,5 +436,52 @@ describe('GET /api/stats', () => {
     expect(status).toBe(200);
     expect(body).toMatchObject({ total: 0, last24h: 0, byCategory: [], sourceTiers: [] });
     expect(body.perHour).toHaveLength(24);
+  });
+});
+
+describe('story pictures in the API', () => {
+  it('uses the source picture when there is one, and never a non-https one', async () => {
+    const env = makeEnv();
+    pub(env, 'p1', '2026-10-03T10:00:00.000Z');
+    pub(env, 'p2', '2026-10-03T11:00:00.000Z');
+    insertImage(env, 'p1', { url: 'https://cdn.example/p1.jpg', credit: 'Reuters', credit_url: 'https://www.reuters.com/a' });
+    insertImage(env, 'p2', { url: 'http://cdn.example/p2.jpg' }); // cannot happen through the pipeline, but the API still refuses it
+    const { body } = await get(env, '/api/articles');
+    const byId = Object.fromEntries(body.articles.map((a: any) => [a.id, a.image]));
+    expect(byId.p1).toEqual({ url: 'https://cdn.example/p1.jpg', credit: 'Reuters', credit_url: 'https://www.reuters.com/a', kind: 'source' });
+    expect(byId.p2.kind).toBe('stock');
+  });
+
+  it('is on the story page and in Georgian reads too', async () => {
+    const env = makeEnv();
+    pub(env, 'p3', '2026-10-03T10:00:00.000Z');
+    insertImage(env, 'p3', { url: 'https://cdn.example/p3.jpg' });
+    insertTranslation(env, 'p3');
+    expect((await get(env, '/api/articles/p3')).body.article.image.url).toBe('https://cdn.example/p3.jpg');
+    expect((await get(env, '/api/articles?lang=ka')).body.articles[0].image.url).toBe('https://cdn.example/p3.jpg');
+  });
+
+  it('stock photo choice follows the topic, uses the Georgia set for Georgian stories, and is stable', () => {
+    for (const [category, set] of [['AI & Tech', 'tech'], ['Economics', 'economy'], ['Crypto', 'crypto'], ['Marketing', 'marketing'], ['Real Estate', 'property'], ['Global Trade', 'trade'], ['Geopolitics', 'world'], ['VC & Startups', 'startups'], ['General', 'general'], ['Something new', 'general']] as const) {
+      expect(STOCK_PHOTOS[set]).toContainEqual(stockPhotoFor('x1', category, false));
+    }
+    expect(STOCK_PHOTOS.georgia).toContainEqual(stockPhotoFor('x1', 'Crypto', true));
+    expect(stockPhotoFor('x1', 'Crypto', false)).toBe(stockPhotoFor('x1', 'Crypto', false));
+    const seen = new Set(Array.from({ length: 60 }, (_, i) => stockPhotoFor(`id${i}`, 'Economics', false).url));
+    expect(seen.size).toBeGreaterThan(2); // spread across the set, not always the first photo
+  });
+
+  it('every stock photo is hotlinked from Wikimedia, has a credit, and carries a public licence', () => {
+    for (const [topic, photos] of Object.entries(STOCK_PHOTOS)) {
+      expect(photos.length, topic).toBeGreaterThanOrEqual(3);
+      for (const p of photos) {
+        expect(p.url, p.title).toMatch(/^https:\/\/thumb\.wikimedia\.org\/wikipedia\/commons\/thumb\//);
+        expect(p.page).toMatch(/^https:\/\/commons\.wikimedia\.org\/wiki\/File:/);
+        expect(p.license).toMatch(/^(CC0|Public domain|No restrictions)$/);
+        expect(p.author.length).toBeGreaterThan(0);
+      }
+    }
+    const urls = Object.values(STOCK_PHOTOS).flat().map((p) => p.url);
+    expect(new Set(urls).size).toBe(urls.length);
   });
 });

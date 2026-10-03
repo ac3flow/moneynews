@@ -17,6 +17,8 @@ export interface Env {
   FEEDS_PER_RUN?: string;
   MAX_ARTICLES_PER_RUN?: string;
   PUBLISH_THRESHOLD?: string;
+  /** 'all' (default): show the picture a source supplied. 'primary': only from official sources. 'off': stock photos only. */
+  SOURCE_PHOTOS?: string;
 }
 
 /** Article categories shown as tabs. "Georgia Focus" is a flag, not a category. */
@@ -28,6 +30,7 @@ export const ARTICLE_CATEGORIES = [
   'Marketing',
   'Real Estate',
   'Global Trade',
+  'Geopolitics',
   'VC & Startups',
 ] as const;
 export type ArticleCategory = (typeof ARTICLE_CATEGORIES)[number];
@@ -80,6 +83,8 @@ export interface FeedItemRow {
   category_hint: string | null;
   offered_count: number;
   article_id: string | null;
+  /** Joined in from item_images by the Research stage. */
+  image_url?: string | null;
 }
 
 export interface StageResult {

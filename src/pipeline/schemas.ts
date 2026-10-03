@@ -21,14 +21,42 @@ const fields = (scale: number) =>
   });
 
 /**
- * Optional bar chart: two to six comparable numbers that the sources state, in one unit.
+ * Optional per-story chart. The Research agent picks the type that fits the numbers the sources state:
+ *   bar       2+ comparable values            line / area  3+ values over time, oldest first
+ *   donut     2+ parts of a whole             treemap      3+ parts, sized by value
+ *   funnel    3+ shrinking stages             waterfall    a start value, then signed changes
+ *   gauge     one value on a scale (`max`)    radial       one percentage
+ *   bullet    values against a `target`       radar        3+ metrics on one scale
  * A malformed chart is dropped (`.catch(null)`) rather than sinking the whole briefing.
  */
-export const ChartData = z.object({
-  title: z.string().trim().min(2).max(90),
-  unit: z.string().trim().max(24).default(''),
-  items: z.array(z.object({ label: z.string().trim().min(1).max(70), value: z.number().finite() })).min(2).max(6),
-});
+export const CHART_TYPES = ['bar', 'line', 'area', 'donut', 'treemap', 'funnel', 'waterfall', 'gauge', 'radial', 'bullet', 'radar'] as const;
+export type ChartType = (typeof CHART_TYPES)[number];
+
+/** Fewest items each type needs to say anything. gauge and radial show exactly one value. */
+export const MIN_CHART_ITEMS: Record<ChartType, number> = { bar: 2, line: 3, area: 3, donut: 2, treemap: 3, funnel: 3, waterfall: 3, gauge: 1, radial: 1, bullet: 1, radar: 3 };
+
+export const ChartData = z
+  .object({
+    type: z.enum(CHART_TYPES).default('bar'),
+    title: z.string().trim().min(2).max(90),
+    unit: z.string().trim().max(24).default(''),
+    /** Top of the scale for gauge, radial and radar (a gauge in % needs none). */
+    max: z.number().finite().positive().nullish(),
+    items: z
+      .array(z.object({ label: z.string().trim().min(1).max(70), value: z.number().finite(), target: z.number().finite().nullish() }))
+      .min(1)
+      .max(8),
+  })
+  .superRefine((c, ctx) => {
+    const fail = (message: string) => ctx.addIssue({ code: 'custom', message });
+    const n = c.items.length;
+    if (n < MIN_CHART_ITEMS[c.type]) fail(`${c.type} needs at least ${MIN_CHART_ITEMS[c.type]} items`);
+    if ((c.type === 'gauge' || c.type === 'radial') && n !== 1) fail(`${c.type} shows exactly one value`);
+    if (['donut', 'treemap', 'funnel', 'radar', 'gauge', 'radial'].includes(c.type) && c.items.some((i) => i.value < 0)) fail(`${c.type} cannot show negative values`);
+    if (c.type === 'treemap' && c.items.some((i) => i.value === 0)) fail('treemap sizes must be above zero');
+    if (c.type === 'funnel' && c.items.some((x, i) => i > 0 && x.value > (c.items[i - 1]?.value ?? 0))) fail('funnel stages must not grow');
+    if (c.type === 'bullet' && c.items.some((i) => i.target == null)) fail('bullet items each need a target');
+  });
 export type ChartData = z.infer<typeof ChartData>;
 const optionalChart = ChartData.nullable().optional().catch(null);
 
