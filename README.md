@@ -114,6 +114,7 @@ The registry holds the 13 categories from the brief plus Geopolitics: 332 source
 | `GET /api/slots?date=&tab=` | Stories per 5-minute slot (feeds the tape in the UI). |
 | `GET /api/meta` | Tabs, counts, next cron slot, last run, and `writing` (false when no Gemini key is set, which the site shows as "new stories are paused"). |
 | `GET /api/status` | Health: last run, queue sizes, feed errors in 24h, and `warnings` (for example a missing `GEMINI_API_KEY`). No secrets. |
+| `GET /api/admin/events?stage=&outcome=&article=&limit=` | Admin only. The audit trail, newest first: what a stage decided and why (for example the words the Georgian proofreader quoted). |
 | `POST /api/run[/stage]` | Admin only. Runs the whole pipeline, or one stage (`collect`, `research`, `edit`, `fact_check`, `translate`, `ka_grammar`, `publish`), now. |
 
 All stored timestamps are UTC ISO-8601. The browser renders them in `Asia/Tbilisi`.

@@ -302,6 +302,22 @@ describe('other endpoints', () => {
     expect(JSON.stringify(body)).not.toContain('sk-secret');
   });
 
+  it('GET /api/admin/events needs the admin key and filters the audit trail', async () => {
+    const env = makeEnv({ ADMIN_KEY: 's3cret' });
+    const ev = env.DB.raw.prepare(`INSERT INTO pipeline_events (run_id, article_id, stage, outcome, detail, created_at) VALUES ('r', ?, ?, ?, ?, '2026-10-03T10:00:00.000Z')`);
+    ev.run('a1', 'ka_grammar', 'error', JSON.stringify({ reason: 'review_failed', problems: [{ field: 'headline', text: 'x', problem: 'y' }] }));
+    ev.run('a2', 'edit', 'ok', null);
+    const call = (path: string, headers: Record<string, string> = {}) => handleApi(new Request(`https://news.test${path}`, { headers }), env);
+    expect((await call('/api/admin/events')).status).toBe(401);
+    expect((await call('/api/admin/events', { 'x-admin-key': 'wrong' })).status).toBe(401);
+    const all = (await (await call('/api/admin/events', { 'x-admin-key': 's3cret' })).json()) as any;
+    expect(all.events.map((e: any) => e.stage)).toEqual(['edit', 'ka_grammar']); // newest first
+    const one = (await (await call('/api/admin/events?stage=ka_grammar&outcome=error&article=a1', { authorization: 'Bearer s3cret' })).json()) as any;
+    expect(one.events).toHaveLength(1);
+    expect(one.events[0].detail.problems[0].problem).toBe('y');
+    expect((await handleApi(new Request('https://news.test/api/admin/events'), makeEnv())).status).toBe(401); // disabled without a key
+  });
+
   it('POST /api/run requires the admin key (header or bearer), is disabled without one, and rejects GET', async () => {
     const call = (env: Env, init: RequestInit, path = '/api/run/research') => handleApi(new Request(`https://news.test${path}`, init), env);
     const off = makeEnv();

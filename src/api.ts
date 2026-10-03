@@ -556,6 +556,29 @@ async function authorised(req: Request, env: Env): Promise<boolean> {
   return diff === 0;
 }
 
+// ─── GET /api/admin/events (admin) ──────────────────────────────────────────
+/** The audit trail, newest first, so a stage's decisions (what the proofreader quoted, why a story was rejected) can be read. */
+async function adminEvents(env: Env, sp: URLSearchParams): Promise<Response> {
+  const limit = Math.min(100, Math.max(1, Number.parseInt(sp.get('limit') ?? '30', 10) || 30));
+  const { results } = await env.DB.prepare(
+    `SELECT id, run_id, article_id, stage, outcome, detail, created_at FROM pipeline_events
+     WHERE (?1 IS NULL OR stage = ?1) AND (?2 IS NULL OR outcome = ?2) AND (?3 IS NULL OR article_id = ?3)
+     ORDER BY id DESC LIMIT ?4`,
+  )
+    .bind(sp.get('stage'), sp.get('outcome'), sp.get('article'), limit)
+    .all<{ id: number; run_id: string | null; article_id: string | null; stage: string; outcome: string; detail: string | null; created_at: string }>();
+  const events = results.map((r) => {
+    let detail: unknown = r.detail;
+    try {
+      detail = r.detail ? JSON.parse(r.detail) : null;
+    } catch {
+      detail = r.detail?.slice(0, 2000) ?? null;
+    }
+    return { ...r, detail };
+  });
+  return json({ events }, 200, 'no-store');
+}
+
 // ─── router ─────────────────────────────────────────────────────────────────
 export async function handleApi(req: Request, env: Env): Promise<Response> {
   const url = new URL(req.url);
@@ -570,6 +593,7 @@ export async function handleApi(req: Request, env: Env): Promise<Response> {
       if (path === '/api/stats') return await stats(env);
       if (path === '/api/meta') return await meta(env);
       if (path === '/api/status') return await status(env);
+      if (path === '/api/admin/events') return (await authorised(req, env)) ? await adminEvents(env, url.searchParams) : fail(401, 'unauthorized');
     }
 
     const run = /^\/api\/run(?:\/([a-z_]+))?$/.exec(path);
