@@ -25,3 +25,11 @@ declare module '*.js?raw' {
   const js: string;
   export default js;
 }
+declare module '*.css?raw' {
+  const css: string;
+  export default css;
+}
+declare module '*/_headers?raw' {
+  const headers: string;
+  export default headers;
+}
