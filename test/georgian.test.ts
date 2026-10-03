@@ -305,6 +305,15 @@ describe('the Georgian Proofreader gate', () => {
     expect(d.problems[0]).toMatchObject({ field: 'summary', text: 'ტერორისტulი' });
   });
 
+  it("the checker's own note about its changes is not proofread as story text", async () => {
+    const env = makeEnv();
+    await translated(env);
+    const note = fakeLlm({ ka_grammar: (i) => ({ articles: i.articles.map((a: any) => ({ ...a, corrections: "Replaced 'ტერორისტulი' and a Cyrillic о, fixed the quote ( and spacing ,." })) }) });
+    await run(env, ['ka_grammar'], note);
+    expect(note.calls).toEqual(['ka_grammar', 'ka_review']); // not stopped by the note
+    expect(ka(env)?.grammar_checked).toBe(1);
+  });
+
   it('the proofreader sees the English original beside the Georgian, on the Georgian model', async () => {
     const env = makeEnv({ GEMINI_MODEL_KA: 'big-model' });
     await translated(env);
