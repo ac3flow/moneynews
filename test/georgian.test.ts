@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { georgianShare, looksGeorgian } from '../src/pipeline/georgian';
+import { georgianIssues, georgianShare, looksGeorgian } from '../src/pipeline/georgian';
 import { digitsPreserved } from '../src/pipeline/numbers';
 import { PIPELINE_ORDER, STAGED_CRONS, runPipeline, stagesForCron, type StageName } from '../src/pipeline/run';
 import type { ArticleRow } from '../src/types';
@@ -70,7 +70,7 @@ describe('Georgian lifecycle: Fact-Check -> Translate -> Georgian Grammar -> Pub
 
     await run(env, ['publish'], llm);
     expect(state(env)).toMatchObject({ status: 'published', published_at: '2026-10-03T13:15:00.000Z' });
-    expect(llm.calls).toEqual(['translate', 'ka_grammar']);
+    expect(llm.calls).toEqual(['translate', 'ka_grammar', 'ka_review']);
   });
 
   it('translates only verified articles, never unchecked or rejected ones', async () => {
@@ -139,7 +139,7 @@ describe('Georgian lifecycle: Fact-Check -> Translate -> Georgian Grammar -> Pub
     const base = fakeLlm();
     const spy = { calls: base.calls, json: (req: any) => ((seen[req.label] = req.model), base.json(req)) } as typeof base;
     await run(env, ['translate', 'ka_grammar'], spy);
-    expect(seen).toEqual({ translate: 'gemini-2.5-pro', ka_grammar: 'gemini-2.5-pro' });
+    expect(seen).toEqual({ translate: 'gemini-2.5-pro', ka_grammar: 'gemini-2.5-pro', ka_review: 'gemini-2.5-pro' });
   });
 });
 
@@ -182,11 +182,149 @@ describe('staged cron triggers (Workers Free)', () => {
     expect(status()).toBe('edited');
 
     await trig('3-59/5 * * * *', 3);
-    expect(llm.calls.slice(4)).toEqual(['ka_grammar']);
+    expect(llm.calls.slice(4)).toEqual(['ka_grammar', 'ka_review']);
     expect(status()).toBe('published');
     expect(rows<ArticleRow>(env, `SELECT * FROM articles`)[0]?.published_at).toBe(new Date(at(3)).toISOString());
 
     await trig('4-59/5 * * * *', 4); // second collect: no new work, no crash
     expect(status()).toBe('published');
+  });
+});
+
+describe('georgianIssues (what a script can catch without reading Georgian)', () => {
+  const GOOD = { headline: 'Nvidia-მ ახალი ჩიპი წარადგინა', summary: 'კომპანიამ ახალი ჩიპი წარადგინა.', what_happened: 'პირველი აბზაცი სრულდება წერტილით.\n\nმეორე აბზაცი კითხვით სრულდება?', why_it_matters: 'ეს მნიშვნელოვანია, რადგან ფასები იცვლება.', risks_uncertainty: 'მონაცემები შეიძლება შეიცვალოს.', figures_dates: 'განაკვეთი: 4.25 %\nშემდეგი შეხვედრა: 28 ოქტომბერი', affected_entities: 'ბაზრები, ინვესტორები' };
+  const bad = (over: Record<string, string>) => georgianIssues({ ...GOOD, ...over });
+  const problems = (over: Record<string, string>) => bad(over).map((p) => p.problem).join(' | ');
+
+  it('passes clean Georgian, Latin names with Georgian endings, and headlines without a full stop', () => {
+    expect(georgianIssues(GOOD)).toEqual([]);
+    expect(georgianIssues({ ...GOOD, summary: 'კომპანია „Google“-ის ახალ ჩიპს იყენებს, S&P-ის ინდექსი კი იზრდება.' })).toEqual([]);
+    expect(georgianIssues({ ...GOOD, summary: 'ETF-ები და WTO-მ გადაწყვიტა (როგორც ეს ნათქვამია) „ახალი წესი“.' })).toEqual([]);
+  });
+
+  it('flags letters that do not belong', () => {
+    expect(problems({ summary: 'ეს ტექსტი ჱ ასოს შეიცავს.' })).toMatch(/archaic/);
+    expect(problems({ summary: 'ᲔᲡ ᲙᲐᲞᲘᲢᲐᲚᲘᲖᲔᲑᲣᲚᲘᲐ.' })).toMatch(/Mtavruli/);
+    expect(problems({ summary: 'ეს ტექსტი содержит русские буквы.' })).toMatch(/script/);
+  });
+
+  it('flags a word that is half Latin and half Georgian, but not a hyphenated ending', () => {
+    expect(problems({ summary: 'თავდასხმა ტერორისტulი აქტია.' })).toMatch(/mixes Latin and Georgian/);
+    expect(bad({ summary: 'თავდასხმა ტერორისტulი აქტია.' })[0]).toMatchObject({ field: 'summary', text: 'ტერორისტulი' });
+    expect(georgianIssues({ ...GOOD, summary: 'FlyDubai-ს თვითმფრინავი დაეშვა.' })).toEqual([]);
+  });
+
+  it('flags broken spacing, punctuation and brackets', () => {
+    expect(problems({ summary: 'ბანკმა , რომელიც გადაწყვეტს, გამოაცხადა.' })).toMatch(/space before/);
+    expect(problems({ summary: 'ბანკმა გადაწყვიტა,რომ განაკვეთი შეინარჩუნოს.' })).toMatch(/no space after/);
+    expect(problems({ summary: 'ბანკმა გადაწყვიტა,, რომ დარჩეს.' })).toMatch(/doubled/);
+    expect(problems({ summary: 'ბანკმა (როგორც ითქვა გადაწყვიტა.' })).toMatch(/bracket/);
+    expect(problems({ summary: 'ბანკმა თქვა „ახალი წესი.' })).toMatch(/quotation/);
+  });
+
+  it('flags a repeated word and a stretched letter', () => {
+    expect(problems({ summary: 'ბანკმა ბანკმა გადაწყვიტა დარჩენა.' })).toMatch(/twice in a row/);
+    expect(problems({ summary: 'ბანკმაააა გადაწყვიტა დარჩენა.' })).toMatch(/repeated/);
+  });
+
+  it('flags a sentence field that stops without a full stop, for every paragraph', () => {
+    expect(problems({ summary: 'კომპანიამ ახალი ჩიპი წარადგინა' })).toMatch(/full stop/);
+    expect(problems({ what_happened: 'პირველი აბზაცი სრულდება.\n\nმეორე აბზაცი წყდება' })).toMatch(/full stop/);
+    expect(georgianIssues({ ...GOOD, headline: 'სათაური წერტილის გარეშე' })).toEqual([]);
+  });
+
+  it('does not apply sentence rules to key figures or entity lists', () => {
+    expect(georgianIssues({ ...GOOD, figures_dates: 'განაკვეთი : 4.25 %', affected_entities: 'ბაზრები,ინვესტორები' })).toEqual([]);
+  });
+});
+
+describe('the Georgian Proofreader gate', () => {
+  const translated = async (env: Env) => {
+    verified(env);
+    await run(env, ['translate'], fakeLlm());
+  };
+  const reject = (problems: unknown[]) => fakeLlm({ ka_review: (i) => ({ articles: i.articles.map((a: any) => ({ id: a.id, ok: false, problems })) }) });
+  const PROBLEM = { field: 'headline', text: 'ცჯორის', problem: 'not a Georgian word' };
+
+  it('a text the proofreader rejects is not marked checked and is not published; its problems are recorded', async () => {
+    const env = makeEnv();
+    await translated(env);
+    await run(env, ['ka_grammar', 'publish'], reject([PROBLEM]));
+    expect(ka(env)?.grammar_checked).toBe(0);
+    expect(state(env)?.status).toBe('edited');
+    const e = events(env, 'ka_grammar');
+    expect(e).toHaveLength(1);
+    expect(e[0]?.outcome).toBe('error');
+    expect(JSON.parse(e[0]?.detail ?? '{}')).toMatchObject({ reason: 'review_failed', problems: [PROBLEM] });
+  });
+
+  it('the next attempt hands the quoted problems to the checker, and publishes once the proofreader approves', async () => {
+    const env = makeEnv();
+    await translated(env);
+    await run(env, ['ka_grammar'], reject([PROBLEM]));
+    const seen: any[] = [];
+    const fixing = fakeLlm({ ka_grammar: (i) => (seen.push(...i.articles), { articles: i.articles.map((a: any) => ({ ...a, corrections: 'Replaced the non-word.' })) }) });
+    await run(env, ['ka_grammar', 'publish'], fixing, NOW + 300_000);
+    expect(seen[0].problems).toEqual([PROBLEM]);
+    expect(fixing.calls).toEqual(['ka_grammar', 'ka_review']);
+    expect(ka(env)?.grammar_checked).toBe(1);
+    expect(state(env)?.status).toBe('published');
+  });
+
+  it('after three failed reviews the article is rejected, never published', async () => {
+    const env = makeEnv();
+    await translated(env);
+    const strict = reject([PROBLEM]);
+    for (let i = 0; i < 3; i++) await run(env, ['ka_grammar', 'publish'], strict, NOW + i * 300_000);
+    expect(state(env)?.status).toBe('edited');
+    await run(env, ['ka_grammar', 'publish'], strict, NOW + 4 * 300_000);
+    expect(state(env)?.status).toBe('rejected');
+    expect(JSON.parse(events(env, 'ka_grammar').at(-1)?.detail ?? '{}').reason).toBe('ka_grammar_failed');
+    expect(ka(env)?.grammar_checked).toBe(0);
+  });
+
+  it('"ok" with problems listed, or an article left out of the verdict, is not an approval', async () => {
+    const env = makeEnv();
+    await translated(env);
+    await run(env, ['ka_grammar'], fakeLlm({ ka_review: (i) => ({ articles: i.articles.map((a: any) => ({ id: a.id, ok: true, problems: [PROBLEM] })) }) }));
+    expect(ka(env)?.grammar_checked).toBe(0);
+    await run(env, ['ka_grammar'], fakeLlm({ ka_review: () => ({ articles: [] }) }), NOW + 300_000);
+    expect(ka(env)?.grammar_checked).toBe(0);
+    expect(events(env, 'ka_grammar').map((e) => JSON.parse(e.detail ?? '{}').reason)).toEqual(['review_failed', 'review_missing']);
+  });
+
+  it('code-detected problems stop a text before the proofreader is even asked', async () => {
+    const env = makeEnv();
+    await translated(env);
+    const garbled = fakeLlm({ ka_grammar: (i) => ({ articles: i.articles.map((a: any) => ({ ...a, summary: a.summary.replace(/\.$/, '') + ' ტერორისტulი.' })) }) });
+    await run(env, ['ka_grammar'], garbled);
+    expect(garbled.calls).toEqual(['ka_grammar']); // no ka_review call
+    expect(ka(env)?.grammar_checked).toBe(0);
+    const d = JSON.parse(events(env, 'ka_grammar')[0]?.detail ?? '{}');
+    expect(d.reason).toBe('script_issues');
+    expect(d.problems[0]).toMatchObject({ field: 'summary', text: 'ტერორისტulი' });
+  });
+
+  it('the proofreader sees the English original beside the Georgian, on the Georgian model', async () => {
+    const env = makeEnv({ GEMINI_MODEL_KA: 'big-model' });
+    await translated(env);
+    let input: any;
+    const spy = fakeLlm({ ka_review: (i) => ((input = i), { articles: i.articles.map((a: any) => ({ id: a.id, ok: true, problems: [] })) }) });
+    await run(env, ['ka_grammar'], spy);
+    expect(input.articles[0].english.summary).toContain('4.25 percent');
+    expect(input.articles[0].georgian.summary).toContain('ქართული');
+  });
+
+  it('an outage at the proofreader keeps the corrected text and burns no attempt', async () => {
+    const env = makeEnv();
+    await translated(env);
+    const base = fakeLlm({ ka_grammar: (i) => ({ articles: i.articles.map((a: any) => ({ ...a, headline: a.headline.replace('ქართული', 'გასწორებული'), corrections: '' })) }) });
+    const flaky = { calls: base.calls, json: (req: any) => (req.label === 'ka_review' ? Promise.reject(new Error('Gemini 503')) : base.json(req)) } as typeof base;
+    expect((await run(env, ['ka_grammar'], flaky)).status).toBe('error');
+    expect(ka(env)?.headline).toContain('გასწორებული'); // the correction was saved
+    expect(ka(env)?.grammar_checked).toBe(0);
+    expect(rows<{ n: number }>(env, `SELECT COUNT(*) n FROM pipeline_events WHERE stage = 'ka_grammar' AND outcome = 'error' AND article_id IS NOT NULL`)[0]?.n).toBe(0);
+    await run(env, ['ka_grammar'], fakeLlm(), NOW + 300_000);
+    expect(ka(env)?.grammar_checked).toBe(1);
   });
 });

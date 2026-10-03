@@ -137,3 +137,20 @@ export const KaGrammarOutput = z.object({
   articles: z.array(GeorgianFields.extend({ id: z.string(), corrections: z.string().trim().max(800).default('') })).max(10),
 });
 export type KaGrammarOutput = z.infer<typeof KaGrammarOutput>;
+
+/** The Georgian Proofreader's verdict. It never rewrites: it approves, or quotes what is wrong. */
+export const KaReviewOutput = z.object({
+  articles: z
+    .array(
+      z.object({
+        id: z.string(),
+        ok: z.boolean(),
+        problems: z
+          .array(z.object({ field: z.string().trim().max(40), text: z.string().trim().max(240), problem: z.string().trim().max(300) }))
+          .max(8)
+          .default([]),
+      }),
+    )
+    .max(10),
+});
+export type KaReviewOutput = z.infer<typeof KaReviewOutput>;

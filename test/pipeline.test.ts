@@ -33,7 +33,7 @@ describe('end-to-end pipeline: Research -> Edit -> Fact-Check -> Publish/Reject'
 
     const r = await runPipeline(env, { trigger: 'manual', now: NOW, llm });
     expect(r.status).toBe('ok');
-    expect(llm.calls).toEqual(['research', 'edit', 'fact_check', 'translate', 'ka_grammar']);
+    expect(llm.calls).toEqual(['research', 'edit', 'fact_check', 'translate', 'ka_grammar', 'ka_review']);
 
     const articles = rows<ArticleRow>(env, `SELECT * FROM articles ORDER BY created_at, id`);
     expect(articles).toHaveLength(2);
