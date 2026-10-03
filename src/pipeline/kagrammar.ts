@@ -120,7 +120,7 @@ export async function kaGrammarStage(ctx: StageCtx): Promise<Record<string, unkn
            WHERE article_id=?1 AND lang='ka' AND grammar_checked=0`,
         ).bind(q.article_id, c.headline, c.summary, c.what_happened, c.why_it_matters, c.figures_dates, c.affected_entities, c.risks_uncertainty, ts),
       );
-      const issues = georgianIssues(c);
+      const issues = georgianIssues(plain(c)); // the story's fields only, not the checker's English note about its changes
       if (issues.length) {
         logEvent(ctx, { articleId: q.article_id, stage: 'ka_grammar', outcome: 'error', detail: { reason: 'script_issues', problems: issues.slice(0, 8) } });
         retry++;
