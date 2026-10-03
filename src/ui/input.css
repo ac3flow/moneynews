@@ -1,4 +1,4 @@
-/* IOANE News. Plain CSS (the Tailwind CLI only minifies it). Layout language follows the earlier
+/* Money News. Plain CSS (the Tailwind CLI only minifies it). Layout language follows the earlier
    "Daily Brief" design: deep header, category nav, lead story, ranked lists, topic panels,
    a deep footer. The accent is emerald green. Gold appears only on the trust badge.
    No inline styles are used anywhere (the CSP forbids them): colours come from these tokens. */
