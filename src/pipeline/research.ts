@@ -269,7 +269,9 @@ export async function researchStage(ctx: StageCtx): Promise<Record<string, unkno
     // The optional chart is kept only if every number in it is stated by the cited items or the draft.
     const chart = groundChart(
       b.chart,
-      [...items.map((i) => `${i.title}\n${i.snippet ?? ''}`), b.headline, b.summary, b.what_happened, b.figures_dates].join('\n'),
+      // the day each item was published counts as stated: a story about something launched today may date it so
+      [...items.map((i) => `${i.title}\n${i.snippet ?? ''}\n${i.published_at.slice(0, 10)}`), b.headline, b.summary, b.what_happened, b.figures_dates].join('\n'),
+      now,
     );
     if (chart) {
       statements.push(env.DB.prepare(`INSERT OR IGNORE INTO article_charts (article_id, lang, data, created_at) VALUES (?1, 'en', ?2, ?3)`).bind(id, JSON.stringify(chart), ts));

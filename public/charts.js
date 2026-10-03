@@ -503,6 +503,56 @@ export function radar(axes, { max = 100, aria } = {}) {
   return svg('svg', { class: 'chart radar', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': aria }, kids);
 }
 
+// ─── event timeline ─────────────────────────────────────────────────────────
+
+/**
+ * Dated events on a time axis, with the part already past filled in and a marker for today, plus the
+ * list underneath. items: [{ label, day (whole days since 1970), short, long, rel }], oldest first.
+ */
+export function eventTimeline(items, { today, todayLabel, aria } = {}) {
+  const W = 340;
+  const H = 84;
+  const pl = 30;
+  const pr = 30;
+  const base = 44;
+  const lo = items[0].day;
+  const hi = items[items.length - 1].day;
+  const span = hi - lo || 1;
+  const xs = items.map((it) => pl + ((it.day - lo) / span) * (W - pl - pr));
+  for (let i = 1; i < xs.length; i++) xs[i] = Math.max(xs[i], xs[i - 1] + 24); // events on nearby days stay apart
+  const last = xs[xs.length - 1];
+  if (last > W - pr) for (let i = 0; i < xs.length; i++) xs[i] = pl + ((xs[i] - pl) * (W - pr - pl)) / (last - pl);
+  const showToday = today != null && today >= lo && today <= hi;
+  const tx = showToday ? pl + ((today - lo) / span) * (W - pl - pr) : null;
+
+  const kids = [svg('path', { class: 'tl-axis', d: `M${pl - 12} ${base}H${W - pr + 12}` })];
+  if (showToday && tx > pl - 12) kids.push(svg('path', { class: 'ln s1', d: `M${pl - 12} ${base}H${r1(tx)}` }));
+  if (showToday) {
+    kids.push(svg('path', { class: 'tl-today', d: `M${r1(tx)} ${base - 20}V${base + 20}` }));
+    if (todayLabel) kids.push(svg('text', { class: 'tl-lbl', x: r1(tx), y: 9, 'text-anchor': 'middle' }, todayLabel));
+  }
+  items.forEach((it, i) => {
+    const x = xs[i];
+    kids.push(
+      svg('circle', { class: 'tl-dot', cx: r1(x), cy: base, r: 10 }, svg('title', {}, `${it.long} · ${it.label}`)),
+      svg('text', { class: 'tl-n', x: r1(x), y: base + 4, 'text-anchor': 'middle' }, String(i + 1)),
+      svg('text', { class: 'tl-lbl', x: r1(x), y: i % 2 === 0 ? base + 31 : base - 18, 'text-anchor': 'middle' }, it.short),
+    );
+  });
+  return h(
+    'div',
+    { class: 'events' },
+    svg('svg', { class: 'chart', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': aria }, kids),
+    h(
+      'ol',
+      { class: 'ev-list' },
+      items.map((it, i) =>
+        h('li', {}, h('i', { 'aria-hidden': 'true', text: String(i + 1) }), h('span', {}, h('b', { text: it.long }), it.rel ? h('small', { text: it.rel }) : null, h('span', { class: 'ev-what', text: it.label }))),
+      ),
+    ),
+  );
+}
+
 // ─── sparklines and KPI cards ───────────────────────────────────────────────
 
 /** A tiny trend line. values: numbers (oldest first). */

@@ -503,6 +503,8 @@ async function meta(env: Env): Promise<Response> {
       nextRunAt: nowIso(nextSlot(now)),
       lastPublishedAt: last?.t ?? null,
       lastRunAt: run?.t ?? null,
+      /** False when no Gemini key is configured: the site keeps serving stories but cannot write new ones. */
+      writing: !!env.GEMINI_API_KEY,
       counts: { total, georgia, byCategory },
       tabs: TABS.map(({ id, label }) => ({ id, label })),
     },
@@ -533,6 +535,7 @@ async function status(env: Env): Promise<Response> {
   return json({
     ok: run?.status !== 'error',
     llmConfigured: !!env.GEMINI_API_KEY,
+    warnings: env.GEMINI_API_KEY ? [] : ['GEMINI_API_KEY is not set, so no new stories can be written. Add it as a Secret in the Worker settings.'],
     lastRun: run ? { startedAt: run.started_at, finishedAt: run.finished_at, status: run.status, trigger: run.trigger } : null,
     articles: Object.fromEntries(queue.results.map((r) => [r.status, r.n])),
     feedErrors24h: feedErrors?.n ?? 0,

@@ -136,3 +136,51 @@ describe('groundTranslatedChart (Georgian chart from the Translator)', () => {
     expect(groundTranslatedChart(en, null)).toBeNull();
   });
 });
+
+describe('timeline charts (dated events for stories without comparable numbers)', () => {
+  const NOW = Date.parse('2026-10-03T12:00:00Z');
+  const ESMA = 'ESMA launched a consultation on the reporting framework for third-country CCPs. Responses are due by 31 December 2026, and the final report follows on 15 March 2027.';
+  const tl = (items: { label: string; date: string }[], extra: Record<string, unknown> = {}) => ChartData.parse({ type: 'timeline', title: 'Consultation timeline', items, ...extra });
+
+  it('parses dated items, turns the missing value into zero, and keeps the order rules', () => {
+    const c = tl([{ label: 'Consultation opens', date: '2026-10-02' }, { label: 'Responses due', date: '2026-12-31' }]);
+    expect(c.items.map((i) => i.value)).toEqual([0, 0]);
+    const ok = (items: unknown[]) => ChartData.safeParse({ type: 'timeline', title: 'Title', items }).success;
+    expect(ok([{ label: 'a', date: '2026-10-02' }])).toBe(false); // one event is not a timeline
+    expect(ok([{ label: 'a', date: '2026-12-31' }, { label: 'b', date: '2026-10-02' }])).toBe(false); // oldest first
+    expect(ok([{ label: 'a', date: '2026-10-02' }, { label: 'b' }])).toBe(false);
+    expect(ok([{ label: 'a', date: '31 December 2026' }, { label: 'b', date: '2026-12-31' }])).toBe(false); // ISO only
+    expect(ok([{ label: 'a', date: '2026-10-02' }, { label: 'b', date: '2026-10-02' }])).toBe(true); // same day is fine
+  });
+
+  it('other types still need a value', () => {
+    expect(ChartData.safeParse({ type: 'bar', title: 'Title', items: [{ label: 'a', value: 1 }, { label: 'b' }] }).success).toBe(false);
+  });
+
+  it('keeps dates the sources state, in words, in ISO form or as the day the item was published', () => {
+    expect(groundChart(tl([{ label: 'Responses due', date: '2026-12-31' }, { label: 'Final report', date: '2027-03-15' }]), ESMA, NOW)).not.toBeNull();
+    expect(groundChart(tl([{ label: 'Consultation opens', date: '2026-10-02' }, { label: 'Responses due', date: '2026-12-31' }]), `${ESMA}\n2026-10-02`, NOW)).not.toBeNull();
+    expect(groundChart(tl([{ label: 'Opens', date: '2026-10-02' }, { label: 'Due', date: '2026-12-31' }]), 'Responses are due 31/12 and it opens 2/10.', NOW)).not.toBeNull();
+  });
+
+  it('drops a date the sources never give', () => {
+    expect(groundChart(tl([{ label: 'Responses due', date: '2026-12-30' }, { label: 'Final report', date: '2027-03-15' }]), ESMA, NOW)).toBeNull(); // wrong day
+    expect(groundChart(tl([{ label: 'Responses due', date: '2026-11-30' }, { label: 'Final report', date: '2027-03-15' }]), ESMA, NOW)).toBeNull(); // 30 is not stated
+    expect(groundChart(tl([{ label: 'Responses due', date: '2026-12-31' }, { label: 'Final report', date: '2027-04-15' }]), ESMA, NOW)).toBeNull(); // wrong month
+    expect(groundChart(tl([{ label: 'Responses due', date: '2031-12-31' }, { label: 'Final report', date: '2031-12-31' }]), ESMA, NOW)).toBeNull(); // a year nobody mentioned and far away
+    expect(groundChart(tl([{ label: 'Day 99', date: '2026-12-31' }, { label: 'Final report', date: '2027-03-15' }]), ESMA, NOW)).toBeNull(); // an invented number in a label
+  });
+
+  it('accepts the coming year when the text leaves the year out, but not an unrelated month', () => {
+    const text = 'Responses are due by 31 December and the final report follows on 15 March.';
+    expect(groundChart(tl([{ label: 'Responses due', date: '2026-12-31' }, { label: 'Final report', date: '2027-03-15' }]), text, NOW)).not.toBeNull();
+    expect(groundChart(tl([{ label: 'Responses due', date: '2026-11-15' }, { label: 'Final report', date: '2027-03-15' }]), text, NOW)).toBeNull();
+  });
+
+  it('the Georgian timeline keeps every date', () => {
+    const en = tl([{ label: 'Responses due', date: '2026-12-31' }, { label: 'Final report', date: '2027-03-15' }]);
+    const ka = (a: string, b: string) => ChartData.parse({ type: 'timeline', title: 'კონსულტაციის ვადები', items: [{ label: 'პასუხების ვადა', date: a }, { label: 'საბოლოო ანგარიში', date: b }] });
+    expect(groundTranslatedChart(en, ka('2026-12-31', '2027-03-15'))).not.toBeNull();
+    expect(groundTranslatedChart(en, ka('2026-12-30', '2027-03-15'))).toBeNull();
+  });
+});
