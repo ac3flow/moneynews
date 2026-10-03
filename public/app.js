@@ -3,7 +3,7 @@
 //   #/s/<id>           one whole story   #/about                   how stories are made
 // All story text is written with textContent (never innerHTML): it is LLM-generated from web sources.
 
-import { bullets, columnChart, donut, funnel, gauge, hbars, heatmap, kpiCard, kpiTiles, lineChart, radar, radialBars, stackedBars, timeline, treemap, waterfall } from './charts.js';
+import { bullets, columnChart, donut, eventTimeline, funnel, gauge, hbars, heatmap, kpiCard, kpiTiles, lineChart, radar, radialBars, stackedBars, timeline, treemap, waterfall } from './charts.js';
 import { coverMarkup } from './covers.js';
 import { h, icon } from './dom.js';
 import { DEFAULT_LANG, LANGS, makeT, plural } from './i18n.js';
@@ -295,6 +295,10 @@ function renderLive() {
     cls = 'late';
   } else if (serverNow() - last > DELAYED_AFTER_MS) {
     text = t('liveDelayed', { time: tb(m.lastRunAt).time });
+    cls = 'late';
+  } else if (m.writing === false) {
+    // the site is running but cannot write new stories (no Gemini key): say so instead of counting down to nothing
+    text = t('livePaused', { time: m.lastPublishedAt ? tb(m.lastPublishedAt).time : '–' });
     cls = 'late';
   } else {
     text = remaining === 0 ? t('liveRunning') : t('liveOk', { mm: pad2(Math.floor(remaining / 60000)), ss: pad2(Math.floor((remaining % 60000) / 1000)) });
@@ -603,20 +607,43 @@ async function viewTab(r) {
   ];
 }
 
-function breakdownBlock(trust, a) {
-  const b = trust?.breakdown;
-  if (!b) return null;
-  const rows = [
-    ['credibility', 40],
-    ['primaryEvidence', 20],
-    ['claimSupport', 15],
-  ].map(([key, max]) => ({ label: t(`bd.${key}`), value: ((b[key] ?? 0) / max) * 100, text: `${b[key] ?? 0} / ${max}` }));
-  if (b.penalties < 0) rows.push({ label: t('bd.penalties'), value: -Math.min(100, (Math.abs(b.penalties) / 30) * 100), text: String(b.penalties) });
-  return [hbars(rows, { max: 100, firstAccent: false }), h('p', { class: 'foot-note', text: t('scoreFoot', { score: a.trust_score }) })];
-}
-
 function vizBlock(title, body, note) {
   return body ? h('div', { class: 'viz-block' }, h('p', { class: 'viz-title' }, h('span', { text: title }), note ? h('small', { text: note }) : null), body) : null;
+}
+
+const dayNumber = (ymd) => Math.floor(Date.UTC(+ymd.slice(0, 4), +ymd.slice(5, 7) - 1, +ymd.slice(8, 10)) / 86_400_000);
+/** "31 Dec 2026" for a calendar date written YYYY-MM-DD (no time zone involved). */
+const dateLabel = (ymd, { year = true } = {}) => `${+ymd.slice(8, 10)} ${MONTHS[S.lang][+ymd.slice(5, 7) - 1]}${year ? ` ${ymd.slice(0, 4)}` : ''}`;
+
+function datedEvents(items, aria) {
+  const today = dayNumber(todayTb());
+  const sameYear = new Set(items.map((i) => i.date.slice(0, 4))).size === 1;
+  return eventTimeline(
+    items.map((i) => {
+      const d = dayNumber(i.date) - today;
+      return { label: i.label, day: dayNumber(i.date), short: dateLabel(i.date, { year: !sameYear }), long: dateLabel(i.date), rel: d === 0 ? t('tlToday') : d > 0 ? plural(t, 'inDays', d) : plural(t, 'daysAgo', -d) };
+    }),
+    { today, todayLabel: t('tlToday'), aria },
+  );
+}
+
+/**
+ * A story with no chart of its own can still show its key figures side by side: two or more that
+ * share a unit (percent, a currency, billions) become bars. Returns null when nothing compares.
+ */
+function figureBars(figures) {
+  const MONEY = /^(%|percent|პროცენტ|[$€£]|usd|eur|gel|dollars?|euros?|bn|mn|billion|million|trillion|მლრდ|მლნ|ტრლნ|დოლარ|ევრო|ლარ)/i;
+  const groups = new Map();
+  for (const f of figures) {
+    const m = /^\s*([$€£])?\s*([−-]?\d[\d\s,]*(?:\.\d+)?)\s*(.*?)\s*$/.exec(f.value);
+    if (!m || !f.label) continue;
+    const num = Number(m[2].replace(/[\s,]/g, '').replace('−', '-'));
+    const unit = `${m[1] ?? ''}${m[3]}`.toLowerCase().replace(/[\s.]+/g, '');
+    if (!Number.isFinite(num) || !MONEY.test(unit)) continue;
+    groups.set(unit, [...(groups.get(unit) ?? []), { label: f.label, value: Math.abs(num), text: f.value }]);
+  }
+  const best = [...groups.values()].sort((x, y) => y.length - x.length)[0];
+  return best && best.length >= 2 ? hbars(best.slice(0, 6)) : null;
 }
 
 /** One chart from the optional, source-checked spec the Research agent proposed (bar when the type is missing). */
@@ -647,6 +674,8 @@ function specChart(c) {
     }
     case 'bullet':
       return bullets(items.map((i) => ({ label: i.label, value: i.value, target: i.target, text: val(i.value), targetText: t('targetN', { n: val(i.target) }) })));
+    case 'timeline':
+      return datedEvents(items, aria);
     case 'radar':
       return radar(items.map((i) => ({ label: i.label, value: i.value, text: val(i.value) })), { max: c.max ?? (c.unit === '%' ? 100 : Math.max(...values) * 1.1), aria });
     default:
@@ -658,12 +687,7 @@ function vizPanel(a, data, stats) {
   const tiles = (a.figures ?? []).filter((f) => f.label && /\d/.test(f.value) && f.value.length <= 18).slice(0, 4);
   const chart = data.chart;
   const events = (data.timeline ?? []).filter((e) => safeHref(e.url));
-  const b = data.trust?.breakdown;
-  const claims = data.trust?.claims;
-  const ratio = claims?.total > 0 ? Math.round((claims.supported / claims.total) * 100) : null;
-  const unclear = claims?.total > 0 ? Math.max(0, claims.total - claims.supported - claims.contradicted) : 0;
-  const bars = [{ label: t('barScore'), value: a.trust_score, target: 60, text: String(a.trust_score), targetText: t('needsN', { n: 60 }) }];
-  if (ratio != null) bars.push({ label: t('barClaims'), value: ratio, target: 70, text: `${ratio}%`, targetText: t('needsN', { n: '70%' }) });
+  const compared = chart ? null : figureBars(a.figures ?? []);
   const week = stats?.topicDaily?.[a.category];
   const dayLabels = stats?.daily?.map((d) => dayShort(d.day)) ?? [];
   return h(
@@ -672,36 +696,8 @@ function vizPanel(a, data, stats) {
     h('h2', { id: 'viz-h', class: 'h-sm', text: t('vizTitle') }),
     vizBlock(t('vizKey'), tiles.length ? kpiTiles(tiles.map((f) => ({ label: f.label, value: f.value }))) : null),
     chart ? vizBlock(chart.title, specChart(chart), null) : null,
-    vizBlock(t('vzGauge'), gauge(a.trust_score, 100, { text: String(a.trust_score), mark: 60, markLabel: t('needsN', { n: 60 }), aria: `${t('vzGauge')}: ${a.trust_score} / 100` })),
-    claims?.total > 0
-      ? vizBlock(
-          t('vzClaims'),
-          donut(
-            [
-              { label: t('claimSupported'), n: claims.supported, text: String(claims.supported) },
-              { label: t('claimContradicted'), n: claims.contradicted, text: String(claims.contradicted) },
-              { label: t('claimUnclear'), n: unclear, text: String(unclear) },
-            ],
-            { center: { value: `${ratio}%`, label: t('claimsOf', { n: claims.total }) }, aria: t('vzClaims') },
-          ),
-        )
-      : null,
-    vizBlock(t('vzBars'), bullets(bars, { max: 100 })),
-    b
-      ? vizBlock(
-          t('vzProfile'),
-          radar(
-            [
-              { label: t('aboutTrust'), value: a.trust_score, text: `${a.trust_score} / 100` },
-              { label: t('bd.credibility'), value: ((b.credibility ?? 0) / 40) * 100, text: `${b.credibility ?? 0} / 40` },
-              { label: t('bd.primaryEvidence'), value: ((b.primaryEvidence ?? 0) / 20) * 100, text: `${b.primaryEvidence ?? 0} / 20` },
-              { label: t('bd.claimSupport'), value: ((b.claimSupport ?? 0) / 15) * 100, text: `${b.claimSupport ?? 0} / 15` },
-            ],
-            { max: 100, aria: t('vzProfile') },
-          ),
-        )
-      : null,
-    vizBlock(t('vizScore'), breakdownBlock(data.trust, a) ?? h('p', { class: 'foot-note', text: t('scoreNone') })),
+    compared ? vizBlock(t('vzFigures'), compared, null) : null,
+    vizBlock(t('vzGauge'), gauge(a.trust_score, 100, { text: String(a.trust_score), aria: `${t('vzGauge')}: ${a.trust_score} / 100` })),
     week && sum(week) > 0
       ? vizBlock(t('vzTopic', { name: catName(a.category) }), lineChart({ labels: dayLabels, series: [{ values: week, area: true, cls: 's1', tip: (i) => `${dayLabels[i]} · ${plural(t, 'stories', week[i])}` }], fmt: (n) => String(Math.round(n)), integer: true, aria: t('vzTopic', { name: catName(a.category) }) }), t('vzTopicNote'))
       : null,

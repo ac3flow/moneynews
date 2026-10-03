@@ -3,6 +3,9 @@
   "main": "src/index.ts",
   "compatibility_date": "2025-09-01",
   "observability": { "enabled": true },
+  // Keep variables and secrets added in the Cloudflare dashboard when a deploy runs. Without this a deploy
+  // from this file replaces dashboard variables with the ones below, which can silently remove GEMINI_API_KEY.
+  "keep_vars": true,
 
   // Static UI lives in ./public. The Worker only runs for /api/* (and cron).
   "assets": {

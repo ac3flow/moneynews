@@ -264,6 +264,8 @@ describe('other endpoints', () => {
     expect(Date.parse(body.nextRunAt)).toBeGreaterThan(Date.parse(body.now));
     expect(body.lastPublishedAt).toBe('2026-10-03T11:00:00.000Z');
     expect(body.lastRunAt).toBeNull();
+    expect(body.writing).toBe(false); // no Gemini key in this environment
+    expect((await get(makeEnv({ GEMINI_API_KEY: 'k' }), '/api/meta')).body.writing).toBe(true);
     env.DB.raw.prepare(`INSERT INTO pipeline_runs (run_id, trigger, started_at, finished_at, status) VALUES ('r','cron','2026-10-03T13:15:00.000Z','2026-10-03T13:15:20.000Z','ok')`).run();
     expect((await get(env, '/api/meta')).body.lastRunAt).toBe('2026-10-03T13:15:20.000Z');
   });
@@ -273,8 +275,16 @@ describe('other endpoints', () => {
     insertArticle(env, { id: 'q', status: 'raw_research' });
     const { body } = await get(env, '/api/status');
     expect(body.llmConfigured).toBe(true);
+    expect(body.warnings).toEqual([]);
     expect(body.articles).toEqual({ raw_research: 1 });
     expect(JSON.stringify(body)).not.toContain('sk-secret');
+  });
+
+  it('GET /api/status says plainly when the Gemini key is missing', async () => {
+    const { body } = await get(makeEnv(), '/api/status');
+    expect(body.llmConfigured).toBe(false);
+    expect(body.warnings).toHaveLength(1);
+    expect(body.warnings[0]).toMatch(/GEMINI_API_KEY/);
   });
 
   it('GET /api/status shows the latest stage-level failure (so a retired model is visible without the admin key)', async () => {

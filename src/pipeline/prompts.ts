@@ -25,14 +25,15 @@ Rules:
 - risks_uncertainty: what is unconfirmed, single-sourced, preliminary or could change. Always at least one sentence.
 - category: exactly one of ${ARTICLE_CATEGORIES.map((c) => `"${c}"`).join(', ')}.
 - georgia_related: true only when the story concerns the country Georgia (Sakartvelo): its economy, institutions, companies, markets or region. False for the US state.
-- chart: optional, otherwise null. Use it only when the items state numbers that really fit one of these types, and pick the type that fits:
+- chart: a graph of the story's important facts, shown beside it. Give one whenever the items state numbers or dates that fit one of these types (a story about a rule, a consultation, a deal or a deadline usually has dates), otherwise null. Pick the type that fits:
   "bar": two to six comparable values in one unit (two companies, two periods);
   "line" or "area": three or more values over time, oldest first, labels are the periods;
   "donut": two or more parts of one whole (shares);  "treemap": three or more parts, sized by value;
   "funnel": three or more stages that only shrink;  "waterfall": a start value, then signed changes (negative numbers for decreases);
   "gauge": one value on a scale, give "max" (or use unit "%");  "radial": one percentage;
-  "bullet": values against a target, every item has "target";  "radar": three or more metrics of one subject on the same scale.
-  Form: {"type":"bar","title":"...","unit":"...","max":null,"items":[{"label":"...","value":<number>,"target":null}]}. Every value, target, max, and any number inside a label or title, must appear in the items exactly; never compute, estimate or round a figure. Labels are short. If in doubt, null.
+  "bullet": values against a target, every item has "target";  "radar": three or more metrics of one subject on the same scale;
+  "timeline": two or more dated events or deadlines the items state (a launch, a consultation opening, a deadline, a decision date), oldest first; every item has "date" as YYYY-MM-DD and no "value", and the label says what happens that day ("Consultation opens", "Responses due").
+  Form: {"type":"bar","title":"...","unit":"...","max":null,"items":[{"label":"...","value":<number>,"target":null}]}; for a timeline: {"type":"timeline","title":"...","unit":"","max":null,"items":[{"label":"...","date":"2026-12-31"}]}. Every value, target, max, date, and any number inside a label or title, must appear in the items exactly; never compute, estimate or round a figure, and never guess a date the items do not give. The title says what the graph shows ("Consultation timeline"). Labels are short. If in doubt, null.
 - used_item_ids: the ids of every item in the cluster that reports this same event (a second outlet's report counts as independent confirmation, so list it even if you did not quote it). Use at least one. Do not list an item that is about a different event.
 - Write in English, even if a source is in Georgian.
 
@@ -76,7 +77,7 @@ Rules:
 - figures_dates: keep one "Label: value" per line. Translate the label and the unit, keep the digits. affected_entities: comma-separated.
 - Georgian has no capital letters in running text. Do not capitalise mid-sentence.
 - Never leave an English sentence in the output.
-- chart: only when an article has one. Translate its title, unit and every label; keep "type", "max", every value and every target exactly as given, and keep the same items in the same order. Without a chart, return null.
+- chart: only when an article has one. Translate its title, unit and every label; keep "type", "max", every value, every target and every "date" exactly as given, and keep the same items in the same order. Without a chart, return null.
 
 ${UNTRUSTED}
 

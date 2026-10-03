@@ -27,13 +27,16 @@ const fields = (scale: number) =>
  *   funnel    3+ shrinking stages             waterfall    a start value, then signed changes
  *   gauge     one value on a scale (`max`)    radial       one percentage
  *   bullet    values against a `target`       radar        3+ metrics on one scale
+ *   timeline  2+ dated events or deadlines the sources state, oldest first (each item has a `date`)
  * A malformed chart is dropped (`.catch(null)`) rather than sinking the whole briefing.
  */
-export const CHART_TYPES = ['bar', 'line', 'area', 'donut', 'treemap', 'funnel', 'waterfall', 'gauge', 'radial', 'bullet', 'radar'] as const;
+export const CHART_TYPES = ['bar', 'line', 'area', 'donut', 'treemap', 'funnel', 'waterfall', 'gauge', 'radial', 'bullet', 'radar', 'timeline'] as const;
 export type ChartType = (typeof CHART_TYPES)[number];
 
 /** Fewest items each type needs to say anything. gauge and radial show exactly one value. */
-export const MIN_CHART_ITEMS: Record<ChartType, number> = { bar: 2, line: 3, area: 3, donut: 2, treemap: 3, funnel: 3, waterfall: 3, gauge: 1, radial: 1, bullet: 1, radar: 3 };
+export const MIN_CHART_ITEMS: Record<ChartType, number> = { bar: 2, line: 3, area: 3, donut: 2, treemap: 3, funnel: 3, waterfall: 3, gauge: 1, radial: 1, bullet: 1, radar: 3, timeline: 2 };
+
+const ISO_DATE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
 export const ChartData = z
   .object({
@@ -43,7 +46,16 @@ export const ChartData = z
     /** Top of the scale for gauge, radial and radar (a gauge in % needs none). */
     max: z.number().finite().positive().nullish(),
     items: z
-      .array(z.object({ label: z.string().trim().min(1).max(70), value: z.number().finite(), target: z.number().finite().nullish() }))
+      .array(
+        z.object({
+          label: z.string().trim().min(1).max(70),
+          /** Every type but timeline. */
+          value: z.number().finite().optional(),
+          target: z.number().finite().nullish(),
+          /** Timeline only: the day the event happens or happened, YYYY-MM-DD. */
+          date: z.string().regex(ISO_DATE).nullish(),
+        }),
+      )
       .min(1)
       .max(8),
   })
@@ -51,12 +63,21 @@ export const ChartData = z
     const fail = (message: string) => ctx.addIssue({ code: 'custom', message });
     const n = c.items.length;
     if (n < MIN_CHART_ITEMS[c.type]) fail(`${c.type} needs at least ${MIN_CHART_ITEMS[c.type]} items`);
+    if (c.type === 'timeline') {
+      if (c.items.some((i) => !i.date)) fail('timeline items each need a date');
+      if (c.items.some((x, i) => i > 0 && (x.date ?? '') < (c.items[i - 1]?.date ?? ''))) fail('timeline items must run oldest first');
+      return;
+    }
+    if (c.items.some((i) => i.value === undefined)) fail(`${c.type} items each need a value`);
     if ((c.type === 'gauge' || c.type === 'radial') && n !== 1) fail(`${c.type} shows exactly one value`);
-    if (['donut', 'treemap', 'funnel', 'radar', 'gauge', 'radial'].includes(c.type) && c.items.some((i) => i.value < 0)) fail(`${c.type} cannot show negative values`);
-    if (c.type === 'treemap' && c.items.some((i) => i.value === 0)) fail('treemap sizes must be above zero');
-    if (c.type === 'funnel' && c.items.some((x, i) => i > 0 && x.value > (c.items[i - 1]?.value ?? 0))) fail('funnel stages must not grow');
+    const values = c.items.map((i) => i.value ?? 0);
+    if (['donut', 'treemap', 'funnel', 'radar', 'gauge', 'radial'].includes(c.type) && values.some((v) => v < 0)) fail(`${c.type} cannot show negative values`);
+    if (c.type === 'treemap' && values.some((v) => v === 0)) fail('treemap sizes must be above zero');
+    if (c.type === 'funnel' && values.some((v, i) => i > 0 && v > (values[i - 1] ?? 0))) fail('funnel stages must not grow');
     if (c.type === 'bullet' && c.items.some((i) => i.target == null)) fail('bullet items each need a target');
-  });
+  })
+  // Past validation every item has a value (a timeline's is unused and zero).
+  .transform((c) => ({ ...c, items: c.items.map((i) => ({ ...i, value: i.value ?? 0 })) }));
 export type ChartData = z.infer<typeof ChartData>;
 const optionalChart = ChartData.nullable().optional().catch(null);
 

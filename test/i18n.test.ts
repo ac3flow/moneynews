@@ -44,7 +44,6 @@ describe('UI translations', () => {
     // keys built at runtime
     for (const tab of TABS) expect(ka, `tab.${tab.id}`).toHaveProperty(`tab.${tab.id}`);
     for (const c of ARTICLE_CATEGORIES) expect(ka, `cat.${c}`).toHaveProperty(`cat.${c}`);
-    for (const k of ['credibility', 'primaryEvidence', 'claimSupport', 'penalties']) expect(ka).toHaveProperty(`bd.${k}`);
     for (const k of ['top10', 'all', 'georgia']) expect(ka).toHaveProperty(`tabNote.${k}`);
     for (const k of ['Research', 'Editor', 'Fact', 'Translator']) {
       expect(ka).toHaveProperty(`how${k}`);

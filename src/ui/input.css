@@ -2478,3 +2478,70 @@ a.photo-credit:hover {
 .chart.radar text {
   font-size: 12px;
 }
+
+/* event timeline */
+.tl-axis {
+  fill: none;
+  stroke: rgb(var(--ink) / 0.16);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+.tl-today {
+  stroke: rgb(var(--ink) / 0.55);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+}
+.tl-dot {
+  fill: var(--c1);
+  stroke: var(--panel);
+  stroke-width: 2.5;
+}
+.chart .tl-n {
+  fill: var(--panel);
+  font-size: 11px;
+  font-weight: 700;
+}
+.chart .tl-lbl {
+  font-size: 10.5px;
+}
+.ev-list {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+.ev-list li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.ev-list i {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--c1);
+  color: var(--panel);
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 700;
+}
+.ev-list b {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.ev-list small {
+  margin-left: 8px;
+  font-size: 11.5px;
+  color: rgb(var(--ink) / 0.55);
+}
+.ev-what {
+  display: block;
+  color: rgb(var(--ink) / 0.78);
+}
+.events .chart {
+  margin-top: 8px;
+}
