@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ka">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#065f46">
+<title>IOANE News</title>
+<meta name="description" content="ბიზნესი, ტექნოლოგიები და საქართველო: სიახლეები, რომლებსაც ყოველ ხუთ წუთში ვიკვლევთ, ვასწორებთ და ფაქტებს ვამოწმებთ. თითოეულ სიახლეს აქვს სანდოობის ქულა და წყაროები.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;500;600;700&family=Noto+Sans+Georgian:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<script type="module" src="/app.js"></script>
+</head>
+<body>
+<a class="skip" id="skip" href="#main" data-i18n="skip">გადასვლა სიახლეებზე</a>
+<header class="hdr" id="hdr"></header>
+<main id="main" tabindex="-1"></main>
+<footer class="foot" id="foot"></footer>
+<div class="modal" id="modal" role="dialog" aria-modal="true" aria-label="ძიება">
+  <div class="modal-box">
+    <div class="modal-in">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+      <input id="q" type="search" autocomplete="off" spellcheck="false" placeholder="ძიება ამბებში…" aria-label="ძიება">
+      <button type="button" id="modal-close">დახურვა</button>
+    </div>
+    <div class="modal-res" id="res" aria-live="polite"></div>
+  </div>
+</div>
+<noscript><p class="shell" data-i18n="noscript">სიახლეების სანახავად ჩართეთ JavaScript.</p></noscript>
+</body>
+</html>
