@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS feed_items (
 );
 
 CREATE INDEX IF NOT EXISTS idx_feed_items_pool ON feed_items(article_id, published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_feed_items_fetched ON feed_items(fetched_at);
 
 -- Georgian (and any future language) versions of an article. The English text stays in `articles`.
 -- A row is created by the Translator (grammar_checked = 0) and finished by the Georgian Grammar
@@ -77,6 +78,24 @@ CREATE TABLE IF NOT EXISTS article_charts (
     data TEXT NOT NULL,
     created_at TEXT NOT NULL,
     PRIMARY KEY (article_id, lang)
+);
+
+-- A picture a feed item came with (media:content, media:thumbnail, an image enclosure, or the first <img> in the
+-- item). Hotlinked, never copied. Only items that offered one have a row.
+CREATE TABLE IF NOT EXISTS item_images (
+    item_id TEXT PRIMARY KEY,           -- feed_items.id
+    url TEXT NOT NULL
+);
+
+-- The picture a story shows when one of its sources supplied one, with the credit that goes under it.
+-- Stories without a row get a public-domain stock photo chosen when they are read (src/stock-photos.ts).
+CREATE TABLE IF NOT EXISTS article_images (
+    article_id TEXT PRIMARY KEY,
+    url TEXT NOT NULL,
+    credit TEXT NOT NULL,               -- publisher name
+    credit_url TEXT NOT NULL,           -- the article the picture came with
+    weight REAL NOT NULL,               -- that publisher's credibility weight (SOURCE_PHOTOS=primary keeps only 5.0)
+    created_at TEXT NOT NULL
 );
 
 -- One row per pipeline execution (cron or manual). Doubles as the run lock (one live run per scope).

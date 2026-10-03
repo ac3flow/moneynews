@@ -75,6 +75,7 @@ interface IngestRow {
   via_social: number;
   georgia: number;
   category_hint: string | null;
+  image: string | null;
 }
 
 async function collect(ctx: StageCtx, batch: FeedRef[]): Promise<{ polled: number; failed: number; fetched: number; inserted: number }> {
@@ -124,6 +125,7 @@ async function collect(ctx: StageCtx, batch: FeedRef[]): Promise<{ polled: numbe
         via_social: feed.source.social ? 1 : 0,
         georgia: feed.source.georgia ? 1 : 0,
         category_hint: feed.hint ? articleCategoryFor(feed.hint) : null,
+        image: it.image ?? null,
       });
     }
   }
@@ -140,6 +142,16 @@ async function collect(ctx: StageCtx, batch: FeedRef[]): Promise<{ polled: numbe
       .bind(JSON.stringify([...rows.values()]))
       .run();
     inserted = out.meta.changes ?? 0;
+    // Pictures only for items that are new; an INSERT OR IGNORE keeps the first one seen.
+    if (inserted > 0 && [...rows.values()].some((x) => x.image)) {
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO item_images (item_id, url)
+         SELECT json_extract(value,'$.id'), json_extract(value,'$.image') FROM json_each(?1)
+         WHERE json_extract(value,'$.image') IS NOT NULL AND json_extract(value,'$.id') IN (SELECT id FROM feed_items WHERE fetched_at = ?2)`,
+      )
+        .bind(JSON.stringify([...rows.values()].filter((x) => x.image).map((x) => ({ id: x.id, image: x.image }))), fetchedAt)
+        .run();
+    }
   }
   return { polled: batch.length, failed, fetched: rows.size, inserted };
 }
@@ -197,11 +209,17 @@ export async function researchStage(ctx: StageCtx): Promise<Record<string, unkno
   if (clusters.length === 0) return { ...summary, skipped: 'no cluster can meet the double-sourcing rule yet' };
   if (!ctx.llm) return { ...summary, skipped: 'GEMINI_API_KEY not configured' };
 
-  const { results: snippets } = await env.DB.prepare(`SELECT id, snippet FROM feed_items WHERE id IN (SELECT value FROM json_each(?1))`)
+  const { results: extras } = await env.DB.prepare(
+    `SELECT f.id, f.snippet, m.url AS image FROM feed_items f LEFT JOIN item_images m ON m.item_id = f.id WHERE f.id IN (SELECT value FROM json_each(?1))`,
+  )
     .bind(JSON.stringify(clusters.flatMap((c) => c.items.map((i) => i.id))))
-    .all<{ id: string; snippet: string | null }>();
-  const snippetOf = new Map(snippets.map((r) => [r.id, r.snippet]));
-  for (const c of clusters) for (const i of c.items) i.snippet = snippetOf.get(i.id) ?? null;
+    .all<{ id: string; snippet: string | null; image: string | null }>();
+  const extraOf = new Map(extras.map((r) => [r.id, r]));
+  for (const c of clusters)
+    for (const i of c.items) {
+      i.snippet = extraOf.get(i.id)?.snippet ?? null;
+      i.image_url = extraOf.get(i.id)?.image ?? null;
+    }
 
   const payload = {
     clusters: clusters.map((c) => ({
@@ -257,6 +275,14 @@ export async function researchStage(ctx: StageCtx): Promise<Record<string, unkno
       statements.push(env.DB.prepare(`INSERT OR IGNORE INTO article_charts (article_id, lang, data, created_at) VALUES (?1, 'en', ?2, ?3)`).bind(id, JSON.stringify(chart), ts));
     } else if (b.chart) {
       logEvent(ctx, { articleId: id, stage: 'research', outcome: 'skipped', detail: { reason: 'chart_not_grounded' } });
+    }
+    // The story's picture is the one that came with its most credible cited source.
+    const lead = [...items].sort((a, b) => citationFromItem(b).weight - citationFromItem(a).weight).find((i) => i.image_url);
+    if (lead?.image_url) {
+      const c = citationFromItem(lead);
+      statements.push(
+        env.DB.prepare(`INSERT OR IGNORE INTO article_images (article_id, url, credit, credit_url, weight, created_at) VALUES (?1,?2,?3,?4,?5,?6)`).bind(id, lead.image_url, c.name, lead.url, c.weight, ts),
+      );
     }
     ids.forEach((i) => used.add(i));
     created.push(id);

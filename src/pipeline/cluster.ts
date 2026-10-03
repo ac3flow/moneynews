@@ -16,8 +16,14 @@ const STOP = new Set(
     'january february march april may june july august september october november december jan feb mar apr jun jul aug sep sept oct nov dec').split(' '),
 );
 
-/** Fold plurals so "ETFs" meets "ETF" and "rates" meets "rate". */
+// Georgian function words and headline filler. Case endings are the one thing Georgian headlines never share, so
+// words are matched by their first letters (see stem), which makes a stop list over whole words the right tool.
+const KA_STOP = new Set('და რომ არის იყო იქნება ამ ეს ის იმ თუ კი ან არ მისი მათი მის მას ასევე შესახებ შემდეგ წინ წლის დღეს გუშინ ახალი ბოლო ყველა როგორც მაგრამ რადგან სადაც ჯერ უკვე კიდევ მხოლოდ'.split(' '));
+const isGeorgian = (w: string): boolean => /[\u10d0-\u10ff]/.test(w);
+
+/** Fold plurals so "ETFs" meets "ETF" and "rates" meets "rate". Georgian words keep their first four letters (the root). */
 function stem(w: string): string {
+  if (isGeorgian(w)) return w.length > 4 ? w.slice(0, 4) : w;
   if (w.length > 4 && w.endsWith('ies')) return `${w.slice(0, -3)}y`;
   if (w.length > 3 && w.endsWith('s') && !/(ss|us|is)$/.test(w)) return w.slice(0, -1);
   return w;
@@ -26,10 +32,11 @@ function stem(w: string): string {
 export function tokens(text: string): Set<string> {
   const out = new Set<string>();
   const clean = text.toLowerCase().replace(/(\d),(?=\d{3}\b)/g, '$1').replace(/['’]s\b/g, ''); // "29,000" -> "29000"
-  for (const raw of clean.split(/[^a-z0-9.%$€£]+/)) {
+  for (const raw of clean.split(/[^a-z0-9.%$€£\u10d0-\u10ff]+/)) {
     const bare = raw.replace(/^[.%]+|[.]+$/g, '');
     if (!bare || /^\d{1,2}$/.test(bare) || /^(19|20)\d\d$/.test(bare)) continue; // bare small numbers and years are noise
     if (bare.length < 3 && !/\d/.test(bare)) continue;
+    if (isGeorgian(bare) && KA_STOP.has(bare)) continue;
     const t = stem(bare);
     if (STOP.has(t)) continue;
     out.add(t);

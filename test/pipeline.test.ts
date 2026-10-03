@@ -4,6 +4,7 @@ import { PIPELINE_ORDER, runPipeline } from '../src/pipeline/run';
 import { selectFeedBatch } from '../src/pipeline/research';
 import { FEEDS } from '../src/registry/sources';
 import type { ArticleRow } from '../src/types';
+import { handleApi } from '../src/api';
 import { fakeLlm, insertArticle, kaArticle, makeEnv, rows, rss, stubFeeds } from './helpers';
 
 const NOW = Date.parse('2026-10-03T13:15:00Z');
@@ -299,5 +300,63 @@ describe('optional charts', () => {
     expect(r.status).toBe('ok');
     expect(rows(env, `SELECT 1 FROM articles WHERE status = 'published'`)).toHaveLength(2);
     expect(rows(env, `SELECT 1 FROM article_charts`)).toHaveLength(0);
+  });
+});
+
+describe('story pictures', () => {
+  const FED_PIC = 'https://www.federalreserve.gov/images/fomc.jpg';
+  const COINDESK_PIC = 'https://static.coindesk.com/btc.jpg';
+  const feeds = () =>
+    stubFeeds({
+      [FED]: rss([{ title: 'Federal Reserve issues FOMC statement holding rates at 4.25 percent', link: 'https://www.federalreserve.gov/newsevents/pressreleases/monetary20261003a.htm', pub: hoursAgo(2), desc: 'The Committee decided to maintain the target range at 4.25 percent.', image: FED_PIC }]),
+      [COINDESK]: rss([{ title: 'Bitcoin ETFs record $1.2 billion inflows as price tops $120,000', link: 'https://www.coindesk.com/markets/2026/10/03/bitcoin-etf-inflows', pub: hoursAgo(3), image: COINDESK_PIC }]),
+      [THEBLOCK]: rss([{ title: 'Bitcoin ETF inflows reach $1.2 billion, price tops $120,000', link: 'https://www.theblock.co/post/1/bitcoin-etf-inflows', pub: hoursAgo(1) }]),
+    });
+  const articlesApi = async (env: ReturnType<typeof makeEnv>) =>
+    ((await (await handleApi(new Request('https://news.test/api/articles?limit=50'), env)).json()) as { articles: any[] }).articles;
+
+  it('keeps the picture a feed item came with, credits its publisher, and shows it on the story', async () => {
+    const env = makeEnv();
+    feeds();
+    await runPipeline(env, { trigger: 'manual', now: NOW, llm: fakeLlm() });
+
+    expect(rows<{ n: number }>(env, `SELECT COUNT(*) n FROM item_images`)[0]?.n).toBe(2);
+    const pics = rows<{ url: string; credit: string; credit_url: string; weight: number }>(env, `SELECT * FROM article_images ORDER BY weight DESC`);
+    expect(pics.map((p) => [p.url, p.credit, p.weight])).toEqual([
+      [FED_PIC, 'Fed', 5],
+      [COINDESK_PIC, 'CoinDesk', 3.5],
+    ]);
+    expect(pics[0]?.credit_url).toContain('federalreserve.gov');
+
+    const list = await articlesApi(env);
+    const fed = list.find((a) => a.sources.some((x: any) => x.url.includes('federalreserve.gov')));
+    expect(fed.image).toEqual({ url: FED_PIC, credit: 'Fed', credit_url: pics[0]?.credit_url, kind: 'source' });
+  });
+
+  it('SOURCE_PHOTOS=off shows stock photos only; =primary keeps only official sources', async () => {
+    const env = makeEnv();
+    feeds();
+    await runPipeline(env, { trigger: 'manual', now: NOW, llm: fakeLlm() });
+    const kinds = async (e: typeof env) => Object.fromEntries((await articlesApi(e)).map((a) => [a.sources.some((x: any) => x.name === 'Fed') ? 'Fed' : 'CoinDesk', a.image.kind]));
+
+    expect(await kinds({ ...env, SOURCE_PHOTOS: 'off' } as typeof env)).toEqual({ Fed: 'stock', CoinDesk: 'stock' });
+    expect(await kinds({ ...env, SOURCE_PHOTOS: 'primary' } as typeof env)).toEqual({ Fed: 'source', CoinDesk: 'stock' });
+    expect(await kinds({ ...env, SOURCE_PHOTOS: 'nonsense' } as typeof env)).toEqual({ Fed: 'source', CoinDesk: 'source' });
+  });
+
+  it('a story whose sources had no picture gets a public-domain stock photo, credited to its photographer', async () => {
+    const env = makeEnv();
+    stubFeeds({
+      [COINDESK]: rss([{ title: 'Bitcoin ETFs record $1.2 billion inflows as price tops $120,000', link: 'https://www.coindesk.com/markets/2026/10/03/bitcoin-etf-inflows', pub: hoursAgo(3) }]),
+      [THEBLOCK]: rss([{ title: 'Bitcoin ETF inflows reach $1.2 billion, price tops $120,000', link: 'https://www.theblock.co/post/1/bitcoin-etf-inflows', pub: hoursAgo(1) }]),
+    });
+    await runPipeline(env, { trigger: 'manual', now: NOW, llm: fakeLlm() });
+    expect(rows(env, `SELECT 1 FROM article_images`)).toHaveLength(0);
+    const [a] = await articlesApi(env);
+    expect(a.image.kind).toBe('stock');
+    expect(a.image.url).toMatch(/^https:\/\/thumb\.wikimedia\.org\//);
+    expect(a.image.credit).toMatch(/ \/ Wikimedia Commons$/);
+    expect(a.image.credit_url).toMatch(/^https:\/\/commons\.wikimedia\.org\/wiki\/File:/);
+    expect((await articlesApi(env))[0].image).toEqual(a.image); // the same story keeps the same photo
   });
 });

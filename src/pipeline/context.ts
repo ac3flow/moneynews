@@ -16,7 +16,7 @@ const int = (v: string | undefined, dflt: number, min: number, max: number): num
 
 export function readConfig(env: Env): PipelineConfig {
   return {
-    feedsPerRun: int(env.FEEDS_PER_RUN, 10, 1, 100),
+    feedsPerRun: int(env.FEEDS_PER_RUN, 10, 1, 400),
     maxArticlesPerRun: int(env.MAX_ARTICLES_PER_RUN, 3, 1, 10),
     publishThreshold: int(env.PUBLISH_THRESHOLD, 60, 0, 100),
     mode: env.PIPELINE_MODE === 'single' ? 'single' : 'staged',

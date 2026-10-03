@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeEntities, normUrl, parseFeed, parsePage, sha, stripHtml } from '../src/pipeline/feeds';
+import { cleanImage, decodeEntities, imageOf, normUrl, parseFeed, parsePage, sha, stripHtml } from '../src/pipeline/feeds';
 import { clusterItems, sameEvent, tokens } from '../src/pipeline/cluster';
 
 const NOW = Date.parse('2026-10-03T12:00:00Z');
@@ -157,5 +157,79 @@ describe('clusterItems on headlines real outlets wrote for the same event', () =
   it('keeps unrelated stories apart in a mixed pool', () => {
     const g = groupsOf(['Fed holds rates', 'Stripe swallows Parafin', 'Stripe to buy embedded finance platform Parafin', 'Google launches test satellite carrying four TPU chips', 'Peter Thiel buys $130 million Bel-Air estate']);
     expect(g.sort()).toEqual([['0'], ['1', '2'], ['3'], ['4']].sort());
+  });
+});
+
+describe('Georgian headlines', () => {
+  const together = (a: string, b: string): boolean => {
+    const filler = Array.from({ length: 40 }, (_, i) => `Regional ${['wheat', 'copper', 'lithium'][i % 3]} harvest ${['rises', 'falls'][i % 2]} in district${i}`);
+    const all = [a, b, ...filler].map((title, i) => ({ id: String(i), title }));
+    const g = clusterItems(all).find((grp) => grp.some((x) => x.id === '0'));
+    return !!g?.some((x) => x.id === '1');
+  };
+
+  it('matches the same event worded with different case endings', () => {
+    expect(together('ეროვნულმა ბანკმა რეფინანსირების განაკვეთი 8 პროცენტზე უცვლელი დატოვა', 'ეროვნული ბანკი რეფინანსირების განაკვეთს 8 პროცენტზე უცვლელად ტოვებს')).toBe(true);
+  });
+
+  it('keeps different Georgian stories apart', () => {
+    expect(together('ეროვნულმა ბანკმა რეფინანსირების განაკვეთი 8 პროცენტზე უცვლელი დატოვა', 'მთავრობამ ახალი გზატკეცილის მშენებლობის ტენდერი გამოაცხადა')).toBe(false);
+  });
+
+  it('reads Georgian words by root and drops function words', () => {
+    const t = tokens('ეროვნულმა ბანკმა და ახალი მთავრობა');
+    expect([...t].sort()).toEqual(['ბანკ', 'ეროვ', 'მთავ']);
+  });
+});
+
+describe('parsePage', () => {
+  it('drops the date that listings put in front of the headline', () => {
+    const html = '<a href="/ge/ekonomika/455157/slug-one">02 ოქტომბერი 2026, 17:20 ეკონომიკის მინისტრი ახალ გეგმას აანონსებს</a><a href="/ge/ekonomika/455158/slug-two">17:20 A plain English headline that is long enough</a><a href="/about">About us and the long page title here</a>';
+    const items = parsePage(html, 'https://imedinews.ge/ge/ekonomika', '^/ge/ekonomika/\\d+/', Date.parse('2026-10-03T12:00:00Z'));
+    expect(items.map((i) => i.title)).toEqual(['ეკონომიკის მინისტრი ახალ გეგმას აანონსებს', 'A plain English headline that is long enough']);
+  });
+});
+
+describe('pictures that come with feed items', () => {
+  const item = (inner: string) => `<rss><channel><item><title>A headline long enough</title><link>https://x.example/a</link><pubDate>Fri, 03 Oct 2026 10:00:00 GMT</pubDate>${inner}</item></channel></rss>`;
+  const imageFor = (inner: string) => parseFeed(item(inner), Date.parse('2026-10-03T12:00:00Z'))[0]?.image;
+
+  it('takes the widest media:content', () => {
+    expect(imageFor(`<media:content url="https://cdn.example/small.jpg" medium="image" width="400"/><media:content url="https://cdn.example/big.jpg" medium="image" width="1600"/>`)).toBe('https://cdn.example/big.jpg');
+  });
+
+  it('falls back to media:thumbnail, an image enclosure, then the first <img> in the description', () => {
+    expect(imageFor(`<media:thumbnail url="https://cdn.example/t.jpg" width="640" height="360"/>`)).toBe('https://cdn.example/t.jpg');
+    expect(imageFor(`<enclosure url="https://cdn.example/e.jpg" type="image/jpeg" length="1"/>`)).toBe('https://cdn.example/e.jpg');
+    expect(imageFor(`<description><![CDATA[<p><img src="https://cdn.example/in-text.jpg" width="800"> Text</p>]]></description>`)).toBe('https://cdn.example/in-text.jpg');
+    expect(imageFor(`<description>&lt;img src=&quot;https://cdn.example/escaped.jpg&quot;&gt;</description>`)).toBe('https://cdn.example/escaped.jpg');
+  });
+
+  it('ignores audio and video enclosures, thumbnails that are too small, and items with no picture', () => {
+    expect(imageFor(`<enclosure url="https://cdn.example/pod.mp3" type="audio/mpeg"/>`)).toBeUndefined();
+    expect(imageFor(`<enclosure url="https://cdn.example/clip.mp4" type="video/mp4"/>`)).toBeUndefined();
+    expect(imageFor(`<media:content url="https://cdn.example/tiny.jpg" medium="image" width="120"/>`)).toBeUndefined();
+    expect(imageFor('')).toBeUndefined();
+  });
+
+  it('only keeps https pictures, and upgrades http and protocol-relative ones', () => {
+    expect(cleanImage('http://cdn.example/a.jpg')).toBe('https://cdn.example/a.jpg');
+    expect(cleanImage('//cdn.example/a.jpg')).toBe('https://cdn.example/a.jpg');
+    expect(cleanImage('javascript:alert(1)')).toBeNull();
+    expect(cleanImage('data:image/png;base64,AAAA')).toBeNull();
+    expect(cleanImage('/relative/a.jpg')).toBeNull();
+    expect(cleanImage('https://192.168.0.1/a.jpg')).toBeNull();
+    expect(cleanImage(`https://cdn.example/${'a'.repeat(700)}.jpg`)).toBeNull();
+  });
+
+  it('rejects logos, icons, SVGs, GIFs and tracking pixels', () => {
+    for (const u of ['https://cdn.example/logo.png', 'https://cdn.example/site/favicon.ico', 'https://cdn.example/a.svg', 'https://cdn.example/a.gif', 'https://cdn.example/pixel.png', 'https://cdn.example/t/1x1.jpg']) {
+      expect(cleanImage(u), u).toBeNull();
+    }
+    expect(imageOf('', '<img src="https://cdn.example/logo.png"><img src="https://cdn.example/photo.jpg">')).toBe('https://cdn.example/photo.jpg');
+  });
+
+  it('asks the BBC for its larger rendition', () => {
+    expect(cleanImage('https://ichef.bbci.co.uk/news/240/cpsprodpb/abc/live/photo.jpg')).toBe('https://ichef.bbci.co.uk/news/976/cpsprodpb/abc/live/photo.jpg');
   });
 });

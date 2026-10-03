@@ -4,7 +4,7 @@ import type { ArticleRow, Env } from '../src/types';
 import { createD1 } from './d1';
 
 export function makeEnv(overrides: Partial<Env> = {}): Env & { DB: ReturnType<typeof createD1> } {
-  return { DB: createD1(), ASSETS: {} as Fetcher, FEEDS_PER_RUN: '100', MAX_ARTICLES_PER_RUN: '5', PUBLISH_THRESHOLD: '60', ...overrides } as Env & { DB: ReturnType<typeof createD1> };
+  return { DB: createD1(), ASSETS: {} as Fetcher, FEEDS_PER_RUN: '400', MAX_ARTICLES_PER_RUN: '5', PUBLISH_THRESHOLD: '60', ...overrides } as Env & { DB: ReturnType<typeof createD1> };
 }
 
 export interface SeedArticle extends Partial<ArticleRow> {
@@ -39,10 +39,19 @@ export function insertArticle(env: Env, a: SeedArticle): void {
     .run(...cols.map((c) => row[c]));
 }
 
-export const rss = (items: { title: string; link: string; pub?: string; desc?: string }[]): string =>
+export const rss = (items: { title: string; link: string; pub?: string; desc?: string; image?: string }[]): string =>
   `<?xml version="1.0"?><rss><channel>${items
-    .map((i) => `<item><title>${i.title}</title><link>${i.link}</link>${i.pub ? `<pubDate>${i.pub}</pubDate>` : ''}<description>${i.desc ?? ''}</description></item>`)
+    .map(
+      (i) =>
+        `<item><title>${i.title}</title><link>${i.link}</link>${i.pub ? `<pubDate>${i.pub}</pubDate>` : ''}<description>${i.desc ?? ''}</description>${i.image ? `<media:content url="${i.image}" medium="image" width="1200"/>` : ''}</item>`,
+    )
     .join('')}</channel></rss>`;
+
+export function insertImage(env: Env, articleId: string, img: { url: string; credit?: string; credit_url?: string; weight?: number }): void {
+  (env.DB as unknown as { raw: { prepare(s: string): { run(...p: unknown[]): unknown } } }).raw
+    .prepare(`INSERT INTO article_images (article_id, url, credit, credit_url, weight, created_at) VALUES (?,?,?,?,?,?)`)
+    .run(articleId, img.url, img.credit ?? 'Reuters', img.credit_url ?? 'https://www.reuters.com/a', img.weight ?? 4.5, '2026-10-03T10:00:00.000Z');
+}
 
 /** Stub global fetch with a url -> body map; everything else is a 404. */
 export function stubFeeds(map: Record<string, string>): void {

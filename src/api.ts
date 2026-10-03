@@ -3,8 +3,9 @@ import { resolveSource } from './registry/trust';
 import { ensureSchema } from './db-init';
 import { PIPELINE_ORDER, STAGE_NAMES, runPipeline, type StageName } from './pipeline/run';
 import { parseLinks } from './pipeline/citations';
-import { SLOT_MS, TIMEZONE, dayRangeUtc, formatSlot, isDate, nextSlot, nowIso, parseSlotMinute, slotRangeUtc, tbilisiDate } from './time';
+import { SLOT_MS, TBILISI_OFFSET_MIN, TIMEZONE, dayRangeUtc, formatSlot, isDate, nextSlot, nowIso, parseSlotMinute, slotRangeUtc, tbilisiDate } from './time';
 import { ChartData } from './pipeline/schemas';
+import { stockPhotoFor } from './stock-photos';
 import { ARTICLE_CATEGORIES, type ArticleRow, type Env } from './types';
 
 // ─── tabs ───────────────────────────────────────────────────────────────────
@@ -18,6 +19,7 @@ export const TABS = [
   { id: 'marketing', label: 'Marketing', category: 'Marketing' },
   { id: 'real-estate', label: 'Real Estate', category: 'Real Estate' },
   { id: 'global-trade', label: 'Global Trade', category: 'Global Trade' },
+  { id: 'geopolitics', label: 'Geopolitics', category: 'Geopolitics' },
   { id: 'vc-startups', label: 'VC & Startups', category: 'VC & Startups' },
 ] as const;
 
@@ -50,7 +52,31 @@ interface KaColumns {
   k_affected_entities?: string | null;
   k_risks_uncertainty?: string | null;
 }
-type Row = ArticleRow & KaColumns;
+/** The picture a source supplied, joined in from article_images. */
+interface ImageColumns {
+  img_url?: string | null;
+  img_credit?: string | null;
+  img_credit_url?: string | null;
+  img_weight?: number | null;
+}
+type Row = ArticleRow & KaColumns & ImageColumns;
+
+/** SOURCE_PHOTOS: 'all' shows the picture a source supplied, 'primary' only one from an official source, 'off' never (stock photos only). */
+export type PhotoPolicy = 'all' | 'primary' | 'off';
+export const photoPolicy = (env: Pick<Env, 'SOURCE_PHOTOS'>): PhotoPolicy => {
+  const v = (env.SOURCE_PHOTOS ?? 'all').trim().toLowerCase();
+  return v === 'primary' || v === 'off' ? v : 'all';
+};
+
+export interface ImageDto {
+  url: string;
+  /** Who to credit: the publisher, or the photographer for a stock photo. */
+  credit: string;
+  /** Where the picture came from: the source's article, or the photo's Wikimedia Commons page. */
+  credit_url: string;
+  /** 'source' came with one of the story's sources, 'stock' is a public-domain photo chosen by topic. */
+  kind: 'source' | 'stock';
+}
 
 export interface ArticleDto {
   lang: Lang;
@@ -67,6 +93,7 @@ export interface ArticleDto {
   sources: { title: string; url: string; trust_score: number; name: string; tier: TierId }[];
   trust_score: number;
   fact_checked: boolean;
+  image: ImageDto;
   /** ISO-8601 UTC. The client renders it in Asia/Tbilisi. */
   published_at: string | null;
   rank?: number;
@@ -83,7 +110,16 @@ export function parseFigures(s: string | null): { label: string; value: string }
     });
 }
 
-export function toDto(r: Row, rank?: number, lang: Lang = 'en'): ArticleDto {
+function imageOf(r: Row, policy: PhotoPolicy): ImageDto {
+  const ok = policy === 'all' || (policy === 'primary' && (r.img_weight ?? 0) >= 5);
+  if (ok && r.img_url && /^https:\/\//i.test(r.img_url) && r.img_credit_url && /^https?:\/\//i.test(r.img_credit_url)) {
+    return { url: r.img_url, credit: r.img_credit ?? resolveSource(r.img_credit_url).name, credit_url: r.img_credit_url, kind: 'source' };
+  }
+  const s = stockPhotoFor(r.id, r.category, !!r.georgia_related);
+  return { url: s.url, credit: `${s.author} / Wikimedia Commons`, credit_url: s.page, kind: 'stock' };
+}
+
+export function toDto(r: Row, rank?: number, lang: Lang = 'en', photos: PhotoPolicy = 'all'): ArticleDto {
   // For lang=ka the joined translation replaces the English text; everything else is shared.
   const ka = lang === 'ka' && r.k_headline != null;
   const v = ka
@@ -119,6 +155,7 @@ export function toDto(r: Row, rank?: number, lang: Lang = 'en'): ArticleDto {
       })),
     trust_score: r.trust_score,
     fact_checked: !!r.fact_checked,
+    image: imageOf(r, photos),
     published_at: r.published_at,
   };
   if (rank !== undefined) dto.rank = rank;
@@ -213,11 +250,15 @@ function filters(q: Pick<ListQuery, 'tab' | 'date' | 'slot'> & { q?: string; lan
 const KA_COLUMNS = `t.headline AS k_headline, t.summary AS k_summary, t.what_happened AS k_what_happened, t.why_it_matters AS k_why_it_matters,
   t.figures_dates AS k_figures_dates, t.affected_entities AS k_affected_entities, t.risks_uncertainty AS k_risks_uncertainty`;
 
+// Aliased so the picture's columns can never collide with a column the filters name.
+const IMG_COLUMNS = 'ai.img_url, ai.img_credit, ai.img_credit_url, ai.img_weight';
+const IMG_JOIN = `LEFT JOIN (SELECT article_id AS img_article_id, url AS img_url, credit AS img_credit, credit_url AS img_credit_url, weight AS img_weight FROM article_images) ai ON ai.img_article_id = a.id`;
+
 /** Georgian reads join the finished translation; a story without one is simply not listed in Georgian. */
 function source(lang: Lang): { select: string; from: string } {
   return lang === 'ka'
-    ? { select: `a.*, ${KA_COLUMNS}`, from: `articles a JOIN article_translations t ON t.article_id = a.id AND t.lang = 'ka' AND t.grammar_checked = 1` }
-    : { select: 'a.*', from: 'articles a' };
+    ? { select: `a.*, ${KA_COLUMNS}, ${IMG_COLUMNS}`, from: `articles a JOIN article_translations t ON t.article_id = a.id AND t.lang = 'ka' AND t.grammar_checked = 1 ${IMG_JOIN}` }
+    : { select: `a.*, ${IMG_COLUMNS}`, from: `articles a ${IMG_JOIN}` };
 }
 
 export function buildListSql(q: ListQuery): { sql: string; binds: (string | number)[] } {
@@ -252,7 +293,7 @@ async function listArticles(env: Env, sp: URLSearchParams): Promise<Response> {
       lang: q.lang,
       timezone: TIMEZONE,
       filter: { date: q.date ?? null, time: q.slot === undefined ? null : formatSlot(q.slot) },
-      articles: page.map((r, i) => toDto(r, isTop ? i + 1 : undefined, q.lang)),
+      articles: page.map((r, i) => toDto(r, isTop ? i + 1 : undefined, q.lang, photoPolicy(env))),
       nextBefore,
     },
     200,
@@ -289,7 +330,7 @@ async function getArticle(env: Env, id: string, langParam: string | null): Promi
   } catch {
     /* audit detail is best-effort */
   }
-  return json({ article: toDto(row, undefined, lang as Lang), trust, chart, timeline }, 200, 'public, max-age=60');
+  return json({ article: toDto(row, undefined, lang as Lang, photoPolicy(env)), trust, chart, timeline }, 200, 'public, max-age=60');
 }
 
 // ─── GET /api/slots ─────────────────────────────────────────────────────────
@@ -308,51 +349,135 @@ async function slots(env: Env, sp: URLSearchParams): Promise<Response> {
 }
 
 // ─── GET /api/stats ─────────────────────────────────────────────────────────
-/** Numbers behind the home page charts: stories per hour, per category, trust spread and source mix. */
-async function stats(env: Env): Promise<Response> {
+const DAY_MS = 86_400_000;
+const BANDS = ['<70', '70-79', '80-89', '90+'] as const;
+
+/**
+ * Short in-memory cache per isolate. D1's free plan counts rows read (5 million a day), and these
+ * endpoints are polled by every open page, so identical requests within the window share one result.
+ */
+const memoCache = new WeakMap<object, Map<string, { at: number; value: unknown }>>(); // per database binding
+async function memo<T>(env: Env, key: string, ttlMs: number, compute: () => Promise<T>): Promise<T> {
+  let cache = memoCache.get(env.DB);
+  if (!cache) memoCache.set(env.DB, (cache = new Map()));
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < ttlMs) return hit.value as T;
+  const value = await compute();
+  cache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+/** Numbers behind the front-page charts. Day and hour buckets are Tbilisi time (a fixed UTC+4). */
+async function computeStats(env: Env) {
   const now = Date.now();
   const hourStart = Math.floor(now / 3600_000) * 3600_000;
-  const since = hourStart - 23 * 3600_000;
-  const [hours, cats, trust, links, avg] = await Promise.all([
+  const sinceHours = hourStart - 23 * 3600_000;
+  const today = tbilisiDate(now);
+  const days = Array.from({ length: 7 }, (_, i) => tbilisiDate(now - (6 - i) * DAY_MS)); // oldest -> today
+  const sinceDays = nowIso(Date.parse(`${days[0]}T00:00:00Z`) - TBILISI_OFFSET_MIN * 60_000);
+  const since24 = nowIso(now - DAY_MS);
+
+  const [hours, grid, cats, bands, trust, links, funnel] = await Promise.all([
     env.DB.prepare(`SELECT strftime('%Y-%m-%dT%H:00:00.000Z', published_at) AS h, COUNT(*) AS n FROM articles WHERE ${PUBLISHED} AND published_at >= ?1 GROUP BY h`)
-      .bind(nowIso(since))
+      .bind(nowIso(sinceHours))
       .all<{ h: string; n: number }>(),
+    // one row per Tbilisi day, hour and topic over the last 7 days: feeds the area, line, heatmap and sparklines
+    env.DB.prepare(
+      `SELECT strftime('%Y-%m-%d', published_at, '+4 hours') AS d, CAST(strftime('%H', published_at, '+4 hours') AS INTEGER) AS hr, category, COUNT(*) AS n, SUM(trust_score) AS s
+       FROM articles WHERE ${PUBLISHED} AND published_at >= ?1 GROUP BY d, hr, category`,
+    )
+      .bind(sinceDays)
+      .all<{ d: string; hr: number; category: string; n: number; s: number }>(),
     env.DB.prepare(`SELECT category, COUNT(*) AS n FROM articles WHERE ${PUBLISHED} GROUP BY category ORDER BY n DESC`).all<{ category: string; n: number }>(),
     env.DB.prepare(
-      `SELECT CASE WHEN trust_score >= 90 THEN 3 WHEN trust_score >= 80 THEN 2 WHEN trust_score >= 70 THEN 1 ELSE 0 END AS b, COUNT(*) AS n FROM articles WHERE ${PUBLISHED} GROUP BY b`,
-    ).all<{ b: number; n: number }>(),
+      `SELECT category, CASE WHEN trust_score >= 90 THEN 3 WHEN trust_score >= 80 THEN 2 WHEN trust_score >= 70 THEN 1 ELSE 0 END AS b, COUNT(*) AS n FROM articles WHERE ${PUBLISHED} GROUP BY category, b`,
+    ).all<{ category: string; b: number; n: number }>(),
+    env.DB.prepare(`SELECT AVG(trust_score) AS a, COUNT(*) AS n, SUM(georgia_related) AS g FROM articles WHERE ${PUBLISHED}`).first<{ a: number | null; n: number; g: number | null }>(),
     env.DB.prepare(`SELECT source_links FROM articles WHERE ${PUBLISHED} ORDER BY published_at DESC LIMIT 100`).all<{ source_links: string }>(),
-    env.DB.prepare(`SELECT AVG(trust_score) AS a FROM articles WHERE ${PUBLISHED}`).first<{ a: number | null }>(),
+    // How much of the last 24 hours' intake became a story: items collected -> drafted -> fact-checked -> published
+    env.DB.prepare(
+      `SELECT (SELECT COUNT(*) FROM feed_items WHERE fetched_at >= ?1) AS collected,
+              (SELECT COUNT(*) FROM articles WHERE created_at >= ?1) AS drafted,
+              (SELECT COUNT(*) FROM articles WHERE created_at >= ?1 AND fact_checked = 1) AS verified,
+              (SELECT COUNT(*) FROM articles WHERE created_at >= ?1 AND status = 'published') AS published`,
+    )
+      .bind(since24)
+      .first<{ collected: number; drafted: number; verified: number; published: number }>(),
   ]);
 
+  // stories per hour, 24 buckets ending now
   const byHour = new Map(hours.results.map((r) => [r.h, r.n]));
   const perHour = Array.from({ length: 24 }, (_, i) => {
-    const at = nowIso(since + i * 3600_000);
+    const at = nowIso(sinceHours + i * 3600_000);
     return { at, n: byHour.get(at) ?? 0 };
   });
-  const spread = [0, 1, 2, 3].map((b) => ({ band: ['<70', '70-79', '80-89', '90+'][b] as string, n: trust.results.find((r) => r.b === b)?.n ?? 0 }));
+
+  // 7-day views from the grid
+  const dayIndex = new Map(days.map((d, i) => [d, i]));
+  const daily = days.map((day) => ({ day, n: 0, trustSum: 0 }));
+  const heat = days.map(() => Array.from({ length: 24 }, () => 0));
+  const topicDaily = new Map<string, number[]>();
+  for (const r of grid.results) {
+    const i = dayIndex.get(r.d);
+    if (i === undefined) continue;
+    const d = daily[i];
+    if (d) {
+      d.n += r.n;
+      d.trustSum += r.s;
+    }
+    const row = heat[i];
+    if (row) row[r.hr] = (row[r.hr] ?? 0) + r.n;
+    const series = topicDaily.get(r.category) ?? Array.from({ length: 7 }, () => 0);
+    series[i] = (series[i] ?? 0) + r.n;
+    topicDaily.set(r.category, series);
+  }
+
+  const bandRows = new Map<string, number[]>();
+  for (const r of bands.results) {
+    const row = bandRows.get(r.category) ?? [0, 0, 0, 0];
+    row[r.b] = r.n;
+    bandRows.set(r.category, row);
+  }
+  const spread = BANDS.map((band, b) => ({ band, n: [...bandRows.values()].reduce((s, row) => s + (row[b] ?? 0), 0) }));
+
+  // source mix, publishers, and how many stories rest on an official source
   const tiers = new Map<TierId, number>();
+  const publishers = new Map<string, number>();
+  let primary = 0;
   for (const r of links.results) {
-    for (const l of parseLinks(r.source_links)) {
+    const ls = parseLinks(r.source_links);
+    if (ls.some((l) => l.trust_score >= 5)) primary++;
+    for (const l of ls) {
       const id = tierOf(l.trust_score, l.trust_score < 2);
       tiers.set(id, (tiers.get(id) ?? 0) + 1);
+      const name = resolveSource(l.url).name;
+      publishers.set(name, (publishers.get(name) ?? 0) + 1);
     }
   }
-  return json(
-    {
-      timezone: TIMEZONE,
-      now: nowIso(now),
-      total: cats.results.reduce((s, r) => s + r.n, 0),
-      last24h: perHour.reduce((s, r) => s + r.n, 0),
-      avgTrust: avg?.a == null ? null : Math.round(avg.a),
-      perHour,
-      byCategory: cats.results,
-      trustSpread: spread,
-      sourceTiers: [...tiers].map(([tier, n]) => ({ tier, n })).sort((a, b) => b.n - a.n),
-    },
-    200,
-    'public, max-age=60',
-  );
+  const total = trust?.n ?? 0;
+  return {
+    timezone: TIMEZONE,
+    now: nowIso(now),
+    today,
+    total,
+    last24h: perHour.reduce((s, r) => s + r.n, 0),
+    avgTrust: trust?.a == null ? null : Math.round(trust.a),
+    perHour,
+    daily: daily.map((d) => ({ day: d.day, n: d.n, avgTrust: d.n ? Math.round(d.trustSum / d.n) : null })),
+    heatmap: { days, cells: heat },
+    byCategory: cats.results,
+    topicDaily: Object.fromEntries(topicDaily),
+    topicBands: { bands: [...BANDS], rows: cats.results.map((c) => ({ category: c.category, counts: bandRows.get(c.category) ?? [0, 0, 0, 0] })) },
+    trustSpread: spread,
+    sourceTiers: [...tiers].map(([tier, n]) => ({ tier, n })).sort((a, b) => b.n - a.n),
+    publishers: [...publishers].map(([name, n]) => ({ name, n })).sort((a, b) => b.n - a.n || a.name.localeCompare(b.name)).slice(0, 12),
+    funnel: { collected: funnel?.collected ?? 0, drafted: funnel?.drafted ?? 0, verified: funnel?.verified ?? 0, published: funnel?.published ?? 0 },
+    shares: { georgiaPct: total ? Math.round(((trust?.g ?? 0) / total) * 100) : 0, primaryPct: links.results.length ? Math.round((primary / links.results.length) * 100) : 0 },
+  };
+}
+
+async function stats(env: Env): Promise<Response> {
+  return json(await memo(env, 'stats', 5 * 60_000, () => computeStats(env)), 200, 'public, max-age=60');
 }
 
 // ─── GET /api/meta, /api/status ─────────────────────────────────────────────

@@ -10,12 +10,15 @@ export interface RawItem {
   snippet: string;
   /** ISO-8601 UTC. For page feeds this is the time the link was first seen. */
   published: string;
+  /** https URL of the picture that came with the item, if any. */
+  image?: string;
 }
 
 export const UA = 'Mozilla/5.0 (compatible; MoneyNews-agent/1.0)';
 const FETCH_TIMEOUT_MS = 8000;
 // A feed is re-polled every few minutes, so only the newest items can be new. Fewer items = less CPU.
 const MAX_ITEMS_PER_FEED = 12;
+const PAGE_CLIP = 150_000;
 
 export async function sha(str: string): Promise<string> {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
@@ -61,6 +64,58 @@ export function stripHtml(s: string): string {
   return t.replace(/\s+/g, ' ').trim();
 }
 
+// ─── pictures ───────────────────────────────────────────────────────────────
+const MIN_IMAGE_WIDTH = 300; // smaller than this is a thumbnail, too soft for a lead picture
+const BAD_IMAGE = /\.(svg|gif|ico)(\?|$)|\/(logo|favicon|avatar|pixel|tracking|spacer|blank)[^/]*$|[?&/_-](1x1|pixel)\b/i;
+
+/** Normalise a picture URL, or return null if it is not worth showing (not https, a logo, a tracking pixel). */
+export function cleanImage(u: string | undefined | null): string | null {
+  let s = decodeEntities(u ?? '').trim();
+  if (s.startsWith('//')) s = `https:${s}`;
+  s = s.replace(/^http:\/\//i, 'https://');
+  if (s.length > 600) return null;
+  try {
+    const x = new URL(s);
+    if (x.protocol !== 'https:' || !x.hostname.includes('.') || /^[\d.]+$/.test(x.hostname)) return null;
+    // the BBC publishes a 240 px thumbnail but serves the same picture at 976 px
+    if (x.hostname === 'ichef.bbci.co.uk') x.pathname = x.pathname.replace(/\/(news|ace\/standard)\/\d+\//, '/$1/976/');
+    const out = x.toString();
+    return BAD_IMAGE.test(out) ? null : out;
+  } catch {
+    return null;
+  }
+}
+
+const attr = (tagText: string, name: string): string | undefined => new RegExp(`\\b${name}=["']([^"']*)["']`, 'i').exec(tagText)?.[1];
+
+/** The best picture an RSS/Atom item carries: the widest media:content/thumbnail or image enclosure, else the first <img>. */
+export function imageOf(block: string, bodyHtml: string): string | null {
+  const found: { url: string; width: number }[] = [];
+  for (const m of block.matchAll(/<(media:content|media:thumbnail|enclosure)\b[^>]*>/gi)) {
+    const t = m[0];
+    const url = attr(t, 'url');
+    if (!url) continue;
+    const type = attr(t, 'type') ?? '';
+    const medium = attr(t, 'medium') ?? '';
+    const isImage = type.startsWith('image/') || medium === 'image' || m[1]?.toLowerCase() === 'media:thumbnail' || /\.(jpe?g|png|webp|avif)(\?|$)/i.test(url);
+    if (!isImage || type.startsWith('video/') || type.startsWith('audio/')) continue;
+    found.push({ url, width: Number(attr(t, 'width')) || 0 });
+  }
+  found.sort((a, b) => b.width - a.width);
+  for (const c of found) {
+    if (c.width && c.width < MIN_IMAGE_WIDTH) continue;
+    const u = cleanImage(c.url);
+    if (u) return u;
+  }
+  const html = decodeEntities(bodyHtml);
+  for (const m of html.matchAll(/<img\b[^>]*>/gi)) {
+    const u = cleanImage(attr(m[0], 'src') ?? attr(m[0], 'data-src'));
+    const w = Number(attr(m[0], 'width')) || 0;
+    if (u && (!w || w >= MIN_IMAGE_WIDTH)) return u;
+  }
+  return null;
+}
+
 const TAG_RES = new Map<string, RegExp>();
 function tag(block: string, name: string): string {
   let re = TAG_RES.get(name);
@@ -100,8 +155,10 @@ export function parseFeed(xml: string, now: number = Date.now()): RawItem[] {
     const dateRaw = tag(b, 'pubDate') || tag(b, 'published') || tag(b, 'updated') || tag(b, 'dc:date');
     const d = new Date(stripHtml(dateRaw));
     const published = Number.isNaN(d.getTime()) ? new Date(now) : d;
-    const snippet = stripHtml(clipRaw(tag(b, 'description') || tag(b, 'summary') || tag(b, 'content:encoded') || tag(b, 'content'))).slice(0, 600);
-    out.push({ title, url: normUrl(link), snippet, published: published.toISOString() });
+    const body = tag(b, 'description') || tag(b, 'summary') || tag(b, 'content:encoded') || tag(b, 'content');
+    const snippet = stripHtml(clipRaw(body)).slice(0, 600);
+    const image = imageOf(b.length > 20_000 ? b.slice(0, 20_000) : b, body.slice(0, 6000));
+    out.push({ title, url: normUrl(link), snippet, published: published.toISOString(), ...(image ? { image } : {}) });
   }
   return out;
 }
@@ -120,7 +177,8 @@ export function parsePage(html: string, pageUrl: string, pattern: string, now: n
     }
     if (!re.test(abs.pathname)) continue;
     const url = normUrl(abs.toString());
-    const text = stripHtml(m[2] ?? '');
+    // Listings often put the date in the link text ("02 ოქტომბერი 2026, 17:20 Headline"): keep only the headline.
+    const text = stripHtml(m[2] ?? '').replace(/^\d{1,2}\s+\p{L}+\s+\d{4},?\s+\d{1,2}:\d{2}\s*/u, '').replace(/^\d{1,2}:\d{2}\s+/, '');
     if (text.length < 15 || seen.has(url)) continue;
     seen.add(url);
     out.push({ title: clip(text, 140), url, snippet: text.slice(0, 600), published: new Date(now).toISOString() });
@@ -143,7 +201,8 @@ export async function fetchFeed(feed: FeedRef, now: number = Date.now()): Promis
     redirect: 'follow',
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const body = await res.text();
+  // Page listings can be 300 KB of markup; the newest links come first, so the head of the page is enough (and CPU is scarce).
+  const body = feed.kind === 'page' ? (await res.text()).slice(0, PAGE_CLIP) : await res.text();
   const items = feed.kind === 'rss' ? parseFeed(body, now) : parsePage(body, feed.url, feed.pattern ?? '.', now);
   if (items.length === 0) throw new Error('no items parsed');
   return items;
