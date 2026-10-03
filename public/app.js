@@ -113,7 +113,9 @@ const fmtNum = (n) => new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 
 // ─── api ────────────────────────────────────────────────────────────────────
 // `fresh` bypasses both the browser cache and ours. Used for the meta poll and explicit refreshes.
 const memo = new Map();
+let freshUntil = 0; // after "new stories" every request skips the browser cache for a few seconds
 async function api(path, { fresh = false } = {}) {
+  fresh ||= Date.now() < freshUntil;
   const hit = memo.get(path);
   if (!fresh && hit && Date.now() - hit.at < 20_000) return hit.value;
   const res = await fetch(path, { cache: fresh ? 'no-store' : 'default', headers: { accept: 'application/json' } });
@@ -290,16 +292,29 @@ async function refreshMeta() {
     S.newStories = !!(m.lastPublishedAt && S.seen && m.lastPublishedAt > S.seen);
     if (!had) renderNav();
     renderLive();
+    if (S.newStories && canAutoRefresh()) showNew();
   } catch {
     for (const el of document.querySelectorAll('.live-text')) el.textContent = t('liveOffline');
     for (const el of document.querySelectorAll('.live-dot')) el.className = 'dot live-dot off';
   }
 }
 
+/**
+ * New stories appear on their own when the reader is looking at a list from the top and is not in the
+ * middle of anything (typing a time, searching, reading a story). Otherwise the "new stories" button waits.
+ */
+function canAutoRefresh() {
+  const r = S.route;
+  const listing = r.name === 'home' || (r.name === 't' && !r.q.get('date') && !r.q.get('time'));
+  const busy = $('modal').classList.contains('open') || /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName ?? '');
+  return listing && !busy && window.scrollY < 150 && document.visibilityState === 'visible';
+}
+
 function showNew() {
   S.seen = S.meta?.lastPublishedAt ?? S.seen;
   S.newStories = false;
   memo.clear();
+  freshUntil = Date.now() + 8000;
   render(true);
 }
 
