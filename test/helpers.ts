@@ -67,7 +67,7 @@ type Handler = (input: any) => unknown;
 const KA = 'ქართული ტექსტი ';
 const digitsOf = (s: string): string => (s.match(/\d+(?:[.,]\d+)*/g) ?? []).join(' ');
 /** Georgian-looking filler that keeps the source's digits, so it passes the real guards. */
-export const kaText = (src: string): string => `${KA.repeat(Math.max(3, Math.ceil(src.length / 14)))}${digitsOf(src)}`.trim();
+export const kaText = (src: string): string => `${KA.repeat(Math.max(3, Math.ceil(src.length / 14)))}${digitsOf(src)}`.trim().replace(/[.,]+$/, '') + '.';
 export const kaFigures = (src: string): string =>
   (src ?? '').split('\n').filter(Boolean).map((l) => `ლეიბლი: ${digitsOf(l) || 'მნიშვნელობა'}`).join('\n');
 export const kaArticle = (a: any) => ({
@@ -82,7 +82,7 @@ export const kaArticle = (a: any) => ({
 });
 
 /** Fake LLM that runs the stage's own zod schema, like the real client. */
-export function fakeLlm(handlers: Partial<Record<'research' | 'edit' | 'fact_check' | 'translate' | 'ka_grammar', Handler>> = {}): Llm & { calls: string[] } {
+export function fakeLlm(handlers: Partial<Record<'research' | 'edit' | 'fact_check' | 'translate' | 'ka_grammar' | 'ka_review', Handler>> = {}): Llm & { calls: string[] } {
   const defaults: Record<string, Handler> = {
     research: (input) => ({
       briefings: input.clusters.map((c: any) => ({
@@ -101,6 +101,7 @@ export function fakeLlm(handlers: Partial<Record<'research' | 'edit' | 'fact_che
     }),
     edit: (input) => ({ articles: input.articles.map((a: any) => ({ ...a, summary: a.summary.replace(/\s+/g, ' ') })) }),
     translate: (input) => ({ articles: input.articles.map(kaArticle) }),
+    ka_review: (input) => ({ articles: input.articles.map((a: any) => ({ id: a.id, ok: true, problems: [] })) }),
     ka_grammar: (input) => ({ articles: input.articles.map((a: any) => ({ ...a, summary: a.summary.replace(/\s+/g, ' '), corrections: 'Fixed case endings.' })) }),
     fact_check: (input) => ({
       results: input.articles.map((a: any) => ({

@@ -34,11 +34,12 @@ An article drafted at `:01` is published at `:03`. The five expressions in `wran
 ## Georgian
 
 - **Translator** writes each verified English briefing in natural Georgian (Latin brand names stay Latin with a hyphenated ending, as in `Google-მა`).
-- **Georgian grammar checker** is a second, independent pass: spelling, case endings (including the narrative case of transitive verbs), verb forms, agreement, singular nouns after numerals, punctuation, English-isms.
+- **Georgian grammar checker** is a second, independent pass: spelling, real-word check, case endings (including the narrative case of transitive verbs), verb forms, agreement, singular nouns after numerals, punctuation, English-isms.
+- **Georgian proofreader** is a third pass that rewrites nothing. It reads the English and the Georgian side by side and either approves the story or quotes exactly what is wrong (a word that does not exist, a wrong ending, a changed meaning, a sentence no one would write). Code runs first and refuses what a script can see: letters from another script, a word half Latin and half Georgian, archaic letters, Mtavruli capitals, spacing and punctuation errors, a repeated word, a sentence with no full stop. A story that fails goes back to the checker with the quoted problems; a story that cannot get through in 3 attempts is rejected, not published.
 - Both stages are guarded in code, not just by prompt: the **digits must be identical** to the English (formatting may change, digits may not) and the text must **really be Georgian**. A failing result is retried and the article is rejected after 3 failed attempts. An LLM outage never counts against an article.
-- An article is published only after its Georgian version has passed the grammar checker. The site does not show a "grammar checked" label; the check simply has to pass first.
+- An article is published only after its Georgian version has been approved by the proofreader. The site does not show a "grammar checked" label; the check simply has to pass first.
 - The whole interface is translated (`public/i18n.js`, Georgian by default, English available). Month and weekday names come from tables in the app because some browsers ship no Georgian locale data.
-- `GEMINI_MODEL_KA` lets the two Georgian stages use a stronger model than the rest.
+- `GEMINI_MODEL_KA` (set to `gemini-3.8-flash`) lets the three Georgian steps use a stronger model than the rest; the cheap default wrote a non-word into a headline and the checker built on it did not notice.
 
 ## The site
 
@@ -60,7 +61,7 @@ Each story may carry one chart that the Research agent proposes and the code che
 | `GEMINI_API_KEY` | secret | – | Required for any drafting, editing, fact-checking or translating. Without it the Worker still collects sources but publishes nothing. |
 | `ADMIN_KEY` | secret | – | Enables `POST /api/run[/stage]`, sent as `x-admin-key` or `Authorization: Bearer`. Unset = endpoint disabled. |
 | `GEMINI_MODEL` | var | `gemini-3.5-flash-lite` | Same variable agent 2 uses. Google retires old models for new accounts (`gemini-2.5-flash` now answers 404 "no longer available to new users"); current names are at <https://ai.google.dev/gemini-api/docs/models>. |
-| `GEMINI_MODEL_KA` | var | `GEMINI_MODEL` | Optional stronger model for translate + Georgian grammar check. |
+| `GEMINI_MODEL_KA` | var | `gemini-3.8-flash` | Model for the Georgian steps: translate, grammar correction, proofreading. Falls back to `GEMINI_MODEL` if removed. |
 | `GEMINI_BASE_URL` | var | Google's endpoint | Route calls through a gateway (e.g. Cloudflare AI Gateway). |
 | `PIPELINE_MODE` | var | `staged` | `staged` (Free) or `single` (Paid). |
 | `FEEDS_PER_RUN` | var | `25` | Sources per collect. Feeds are split into `ceil(159 / FEEDS_PER_RUN)` groups visited in turn: `25` → 7 groups of about 23. Use `170` with `single` on Paid. |
@@ -139,7 +140,7 @@ npm run typecheck
 
 ## Known limits
 
-- **The Georgian has not been read by a native speaker.** The interface text, the agents' prompts and the demo content were written without native review. The Georgian grammar checker and the code guards catch a lot, but they are no substitute for a person. Before launch, have a Georgian speaker read the interface strings in `public/i18n.js` and a day of generated stories, and consider `GEMINI_MODEL_KA` set to a larger model (`gemini-3.8-flash`). The default `gemini-3.5-flash-lite` is the cheapest tier and the one most likely to slip on Georgian grammar.
+- **The Georgian has not been read by a native speaker.** The interface text, the agents' prompts and the demo content were written without native review. The proofreader pass and the code guards catch a lot, but they are models and scripts, not a person, and cannot be tested here against a live model. Before launch, have a Georgian speaker read the interface strings in `public/i18n.js` and a day of generated stories, and consider `GEMINI_MODEL_KA` set to a larger model (`gemini-3.8-flash`). The default `gemini-3.5-flash-lite` is the cheapest tier and the one most likely to slip on Georgian grammar.
 - **Gemini calls are tested against a fake, not live.** The request shape is the same as agent 2's working call plus `system_instruction`; the environment this was built in had no key. Check `GET /api/status` after the first cron runs (`warnings` says if the key is missing; a redeploy that drops it leaves the site up but unable to write stories, and `keep_vars` in `wrangler.jsonc` is there to stop dashboard variables being replaced by a deploy): `lastError` shows the latest stage-level failure (for example Gemini rejecting the model name).
 - **The Free plan's CPU limit is the main risk** (see above). Workers Paid removes it.
 - **Fact-checking judges claims against feed excerpts** (title plus up to 600 characters), not full articles. Briefings are therefore short, and the Research prompt forbids facts the excerpts do not state. Translation fidelity is guarded by the digit check and the grammar pass, not by a second fact-check of the Georgian.
