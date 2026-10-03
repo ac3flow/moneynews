@@ -22,11 +22,18 @@ export interface Llm {
 }
 
 export class LlmError extends Error {
-  constructor(message: string, readonly retryable = false) {
+  constructor(message: string, readonly retryable = false, readonly status?: number) {
     super(message);
     this.name = 'LlmError';
   }
 }
+
+// A model chosen for one stage (GEMINI_MODEL_KA) can be out of quota or not open to this key. Rather than stall
+// the pipeline, that call falls back to the default model, and the override is not tried again for a while.
+const OVERRIDE_RETRY_MS = 10 * 60_000;
+const unavailable = new Map<string, number>();
+export const resetModelFallbacks = (): void => unavailable.clear();
+const FALLBACK_STATUS = new Set([403, 404, 429]);
 
 const DEFAULT_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const REQUEST_TIMEOUT_MS = 90_000;
@@ -45,11 +52,23 @@ export function createLlm(env: Env, fetchImpl: typeof fetch = fetch): Llm | null
   const base = (env.GEMINI_BASE_URL || DEFAULT_BASE).replace(/\/+$/, '');
 
   async function call(system: string, contents: Turn[], modelOverride?: string): Promise<string> {
+    const wanted = modelOverride && modelOverride !== model && (unavailable.get(modelOverride) ?? 0) <= Date.now() ? modelOverride : model;
+    try {
+      return await callModel(system, contents, wanted);
+    } catch (e) {
+      if (wanted === model || !(e instanceof LlmError) || e.status === undefined || !FALLBACK_STATUS.has(e.status)) throw e;
+      unavailable.set(wanted, Date.now() + OVERRIDE_RETRY_MS);
+      console.warn(`Gemini model ${wanted} answered ${e.status}; using ${model} for the next ${OVERRIDE_RETRY_MS / 60_000} minutes`);
+      return callModel(system, contents, model);
+    }
+  }
+
+  async function callModel(system: string, contents: Turn[], useModel: string): Promise<string> {
     let lastError: unknown;
     for (let attempt = 0; attempt < 2; attempt++) {
       if (attempt > 0) await new Promise((r) => setTimeout(r, 2000));
       try {
-        const res = await fetchImpl(`${base}/models/${modelOverride || model}:generateContent`, {
+        const res = await fetchImpl(`${base}/models/${useModel}:generateContent`, {
           method: 'POST',
           headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey as string },
           body: JSON.stringify({
@@ -61,7 +80,7 @@ export function createLlm(env: Env, fetchImpl: typeof fetch = fetch): Llm | null
         });
         if (!res.ok) {
           const detail = (await res.text()).slice(0, 300);
-          throw new LlmError(`Gemini ${res.status}: ${detail}`, res.status === 429 || res.status >= 500);
+          throw new LlmError(`Gemini ${res.status}: ${detail}`, res.status === 429 || res.status >= 500, res.status);
         }
         const body = (await res.json()) as GeminiResponse;
         if (body.promptFeedback?.blockReason) throw new LlmError(`Gemini blocked the prompt: ${body.promptFeedback.blockReason}`);

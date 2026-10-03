@@ -39,7 +39,7 @@ An article drafted at `:01` is published at `:03`. The five expressions in `wran
 - Both stages are guarded in code, not just by prompt: the **digits must be identical** to the English (formatting may change, digits may not) and the text must **really be Georgian**. A failing result is retried and the article is rejected after 3 failed attempts. An LLM outage never counts against an article.
 - An article is published only after its Georgian version has been approved by the proofreader. The site does not show a "grammar checked" label; the check simply has to pass first.
 - The whole interface is translated (`public/i18n.js`, Georgian by default, English available). Month and weekday names come from tables in the app because some browsers ship no Georgian locale data.
-- `GEMINI_MODEL_KA` (set to `gemini-3.8-flash`) lets the three Georgian steps use a stronger model than the rest; the cheap default wrote a non-word into a headline and the checker built on it did not notice.
+- If the Georgian model is out of quota or not open to the key (HTTP 429, 404 or 403), that call falls back to `GEMINI_MODEL` and the Georgian model is not tried again for 10 minutes, so the Georgian steps slow down instead of stalling; the proofreader still has to approve every story. `GEMINI_MODEL_KA` (set to `gemini-3.8-flash`) lets the three Georgian steps use a stronger model than the rest; the cheap default wrote a non-word into a headline and the checker built on it did not notice.
 
 ## The site
 

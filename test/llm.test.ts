@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { LlmError, createLlm, parseJson } from '../src/pipeline/llm';
+import { LlmError, createLlm, parseJson, resetModelFallbacks } from '../src/pipeline/llm';
 import type { Env } from '../src/types';
 
 const schema = z.object({ ok: z.boolean() });
@@ -76,5 +76,34 @@ describe('Gemini client', () => {
     expect(new LlmError('x').retryable).toBe(false);
     expect(parseJson('```json\n{"a":1}\n```')).toEqual({ ok: true, value: { a: 1 } });
     expect(parseJson('{')).toMatchObject({ ok: false });
+  });
+});
+
+describe('a stage model that is out of quota falls back to the default model', () => {
+  beforeEach(resetModelFallbacks);
+  const quota = () => new Response('{"error":{"code":429,"message":"You exceeded your current quota"}}', { status: 429 });
+  const model = (url: string) => /models\/([^:]+):/.exec(url)?.[1];
+
+  it('answers 429 on the override, then uses the default model for that call', async () => {
+    const { llm, calls } = setup([quota(), quota(), reply('{"ok":true}')], { GEMINI_MODEL: 'base-model' });
+    expect(await llm.json({ system: 's', user: 'u', schema, label: 't', model: 'big-model' })).toEqual({ ok: true });
+    expect(calls.map((c) => model(c.url))).toEqual(['big-model', 'big-model', 'base-model']); // the one automatic retry, then the fallback
+  });
+
+  it('does not try the override again for a while, and a 404 or 403 also falls back', async () => {
+    const { llm, calls } = setup([new Response('{"error":{"code":404}}', { status: 404 }), reply('{"ok":true}'), reply('{"ok":true}')], { GEMINI_MODEL: 'base-model' });
+    await llm.json({ system: 's', user: 'u', schema, label: 't', model: 'gone-model' });
+    await llm.json({ system: 's', user: 'u', schema, label: 't', model: 'gone-model' });
+    expect(calls.map((c) => model(c.url))).toEqual(['gone-model', 'base-model', 'base-model']);
+    const { llm: denied, calls: dc } = setup([new Response('{"error":{"code":403}}', { status: 403 }), reply('{"ok":true}')], { GEMINI_MODEL: 'base-model' });
+    await denied.json({ system: 's', user: 'u', schema, label: 't', model: 'private-model' });
+    expect(dc.map((c) => model(c.url))).toEqual(['private-model', 'base-model']);
+  });
+
+  it('other errors on the override are not hidden, and the default model itself is never swapped out', async () => {
+    const { llm } = setup([new Response('{"error":{"code":400}}', { status: 400 })], { GEMINI_MODEL: 'base-model' });
+    await expect(llm.json({ system: 's', user: 'u', schema, label: 't', model: 'odd-model' })).rejects.toThrow(/Gemini 400/);
+    const { llm: base } = setup([quota(), quota()], { GEMINI_MODEL: 'base-model' });
+    await expect(base.json({ system: 's', user: 'u', schema, label: 't' })).rejects.toThrow(/Gemini 429/);
   });
 });
