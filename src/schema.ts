@@ -12,6 +12,7 @@ export const SCHEMA_STATEMENTS: string[] = [
   "CREATE TABLE IF NOT EXISTS article_charts ( article_id TEXT NOT NULL, lang TEXT NOT NULL, data TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (article_id, lang) )",
   "CREATE TABLE IF NOT EXISTS item_images ( item_id TEXT PRIMARY KEY, url TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS article_images ( article_id TEXT PRIMARY KEY, url TEXT NOT NULL, credit TEXT NOT NULL, credit_url TEXT NOT NULL, weight REAL NOT NULL, created_at TEXT NOT NULL )",
+  "CREATE TABLE IF NOT EXISTS article_importance ( article_id TEXT PRIMARY KEY, score INTEGER NOT NULL, llm INTEGER NOT NULL, publishers INTEGER NOT NULL, created_at TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS pipeline_runs ( run_id TEXT PRIMARY KEY, scope TEXT NOT NULL DEFAULT 'all', trigger TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL, stats TEXT )",
   "CREATE INDEX IF NOT EXISTS idx_runs_started ON pipeline_runs(started_at DESC)",
   "CREATE TABLE IF NOT EXISTS pipeline_events ( id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT, article_id TEXT, stage TEXT NOT NULL, outcome TEXT NOT NULL, detail TEXT, created_at TEXT NOT NULL )",

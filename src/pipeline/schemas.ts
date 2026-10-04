@@ -94,6 +94,8 @@ export const ResearchOutput = z.object({
         cluster_id: z.string(),
         category: z.enum(ARTICLE_CATEGORIES),
         georgia_related: z.boolean(),
+        /** 0-100: how much the story matters to readers; a missing or invalid value counts as middling. */
+        importance: z.number().min(0).max(100).transform(Math.round).catch(50),
         used_item_ids: z.array(z.string()).min(1),
         chart: optionalChart,
       }),
