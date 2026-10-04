@@ -8,7 +8,7 @@ import { parseCharts } from './pipeline/schemas';
 import { stockPhotoFor } from './stock-photos';
 import { IMPORTANCE_DECAY_PER_HOUR, fallbackImportance } from './pipeline/importance';
 import { ARTICLE_CATEGORIES, type ArticleRow, type Env } from './types';
-
+import { AI_TECH_SOURCES, AI_TECH_CATEGORIES, sourcesByCategory, sourcesByTag, featuredSources, searchSources, countsByCategory, type AiTechCategoryId } from './registry/ai-tech-directory';
 // ─── tabs ───────────────────────────────────────────────────────────────────
 export const TABS = [
   { id: 'top10', label: 'Top 10' },
