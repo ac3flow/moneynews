@@ -194,6 +194,81 @@ function clip(s: string, n: number): string {
 }
 
 /** Fetch and parse one feed. Throws on HTTP/network failure (callers use allSettled). */
+// ─── open-web search results ────────────────────────────────────────────────
+
+/** Sites that only repeat other publishers' stories under their own address. Counting them would be false corroboration. */
+const AGGREGATORS = /(^|\.)(msn\.com|yahoo\.com|aol\.com|news\.google\.com|google\.com|flipboard\.com|newsbreak\.com|smartnews\.com|dailyhunt\.in|ground\.news|bing\.com|apple\.news|opera\.com|newsnow\.co\.uk|biztoc\.com|feedly\.com|reddit\.com|facebook\.com|x\.com|twitter\.com|youtube\.com|linkedin\.com)$/i;
+
+function acceptable(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return (u.protocol === 'https:' || u.protocol === 'http:') && !AGGREGATORS.test(u.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** Bing wraps every result in a tracking link whose `url` parameter is the article itself. */
+export function unwrapBingLink(link: string): string | null {
+  try {
+    const u = new URL(decodeEntities(link));
+    if (/(^|\.)bing\.com$/i.test(u.hostname)) {
+      const real = u.searchParams.get('url');
+      return real && /^https?:\/\//i.test(real) ? real : null;
+    }
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
+/** Results of a Bing News RSS search: title, snippet, time, picture, and the publisher's own link. */
+export function parseBingNews(xml: string, now: number = Date.now()): RawItem[] {
+  const out: RawItem[] = [];
+  const blocks = /<item>[\s\S]*?<\/item>/gi;
+  let m: RegExpExecArray | null;
+  for (let n = 0; n < 30 && (m = blocks.exec(xml)); n++) {
+    const b = m[0];
+    const title = stripHtml(tag(b, 'title'));
+    const real = unwrapBingLink(tag(b, 'link'));
+    if (!title || !real || !acceptable(real)) continue;
+    const d = new Date(stripHtml(tag(b, 'pubDate')));
+    const published = Number.isNaN(d.getTime()) || d.getTime() > now + 3600_000 ? new Date(now) : d;
+    const image = cleanImage(tag(b, 'News:Image'));
+    out.push({ title, url: normUrl(real), snippet: stripHtml(clipRaw(tag(b, 'description'))).slice(0, 600), published: published.toISOString(), ...(image ? { image } : {}) });
+  }
+  return out;
+}
+
+/** "20261004T031500Z" -> ISO. */
+const gdeltTime = (s: string): number => {
+  const m = /^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)Z$/.exec(s ?? '');
+  return m ? Date.UTC(+m[1]!, +m[2]! - 1, +m[3]!, +m[4]!, +m[5]!, +m[6]!) : NaN;
+};
+
+/** Results of a GDELT DOC 2.0 article search (titles only, but real URLs and often a picture). */
+export function parseGdelt(body: string, now: number = Date.now()): RawItem[] {
+  let articles: unknown;
+  try {
+    articles = (JSON.parse(body) as { articles?: unknown }).articles;
+  } catch {
+    return []; // GDELT answers rate limits and errors in plain text
+  }
+  if (!Array.isArray(articles)) return [];
+  const out: RawItem[] = [];
+  for (const a of articles.slice(0, 40)) {
+    const o = (a ?? {}) as Record<string, unknown>;
+    const url = typeof o.url === 'string' ? o.url : '';
+    const title = typeof o.title === 'string' ? stripHtml(o.title) : '';
+    if (!title || !acceptable(url)) continue;
+    const t = gdeltTime(String(o.seendate ?? ''));
+    const published = Number.isNaN(t) || t > now + 3600_000 ? now : t;
+    const image = cleanImage(typeof o.socialimage === 'string' ? o.socialimage : '');
+    out.push({ title, url: normUrl(url), snippet: '', published: new Date(published).toISOString(), ...(image ? { image } : {}) });
+  }
+  return out;
+}
+
 export async function fetchFeed(feed: FeedRef, now: number = Date.now()): Promise<RawItem[]> {
   const res = await fetch(feed.url, {
     headers: { 'user-agent': UA, accept: feed.kind === 'rss' ? 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*' : 'text/html,*/*' },
@@ -201,6 +276,11 @@ export async function fetchFeed(feed: FeedRef, now: number = Date.now()): Promis
     redirect: 'follow',
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (feed.kind === 'search') {
+    // A search that finds nothing, or is rate limited into an empty answer, is not an error worth logging.
+    const text = await res.text();
+    return feed.provider === 'gdelt' ? parseGdelt(text, now) : parseBingNews(text, now);
+  }
   // Page listings can be 300 KB of markup; the newest links come first, so the head of the page is enough (and CPU is scarce).
   const body = feed.kind === 'page' ? (await res.text()).slice(0, PAGE_CLIP) : await res.text();
   const items = feed.kind === 'rss' ? parseFeed(body, now) : parsePage(body, feed.url, feed.pattern ?? '.', now);

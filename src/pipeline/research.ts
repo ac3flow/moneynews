@@ -11,16 +11,18 @@
 //     Source links are attached from the items, never taken from the model's output.
 
 import { FEEDS, articleCategoryFor, type FeedRef } from '../registry/sources';
+import { resolveSource } from '../registry/trust';
 import { SLOT_MS, nowIso } from '../time';
 import type { FeedItemRow } from '../types';
 import { citationFromItem, linksFromCitations } from './citations';
 import { groundChart } from './chart';
 import { clusterItems } from './cluster';
 import { logEvent, type StageCtx } from './context';
+import { importanceScore } from './importance';
 import { fetchFeed, sha, type RawItem } from './feeds';
 import { RESEARCH_SYSTEM } from './prompts';
 import { ResearchOutput } from './schemas';
-import type { Citation } from './scoring';
+import { scoreArticle, type Citation } from './scoring';
 
 const MAX_ITEM_AGE_MS = 72 * 3600_000; // ignore very old feed items on ingest
 const POOL_WINDOW_MS = 36 * 3600_000; // how long an unused item stays eligible
@@ -46,6 +48,48 @@ export interface ClusterEval {
   hasPrimary: boolean;
   eligible: boolean;
   priority: number;
+}
+
+/** The article category a cluster most likely belongs to: the hint most of its items carry from the feeds that found them. */
+export function hintOf(items: FeedItemRow[]): string | null {
+  const tally = new Map<string, number>();
+  for (const i of items) if (i.category_hint) tally.set(i.category_hint, (tally.get(i.category_hint) ?? 0) + 1);
+  return [...tally].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+}
+
+/**
+ * Even if every claim is backed, can these sources reach the publish threshold? A cluster of two unknown blogs is
+ * "double-sourced" but cannot score high enough, so drafting it would only spend model calls on a story that is rejected.
+ */
+export const canReachThreshold = (ev: ClusterEval, threshold: number): boolean =>
+  scoreArticle(ev.citations, { total: 10, supported: 10, contradicted: 0 }, threshold).decision === 'publish';
+
+/**
+ * Choose the clusters to draft. Priority decides, but a topic with few recent stories gets a lift (4 for none,
+ * 2 for one, 1.3 for two, and so on), and every pick counts against its topic, so a busy news day in one area cannot push
+ * everything else off the site. `counts` is the number of stories per article category in the last 24 hours.
+ */
+export function pickClusters<T extends { items: FeedItemRow[]; ev: ClusterEval }>(candidates: T[], counts: Map<string, number>, n: number): T[] {
+  const left = [...candidates];
+  const have = new Map(counts);
+  const picked: T[] = [];
+  while (picked.length < n && left.length) {
+    let at = 0;
+    let top = Number.NEGATIVE_INFINITY;
+    left.forEach((c, i) => {
+      const h = hintOf(c.items);
+      const score = c.ev.priority + (h ? 4 / (1 + (have.get(h) ?? 0)) : 0);
+      if (score > top) {
+        top = score;
+        at = i;
+      }
+    });
+    const [choice] = left.splice(at, 1) as [T];
+    picked.push(choice);
+    const h = hintOf(choice.items);
+    if (h) have.set(h, (have.get(h) ?? 0) + 1);
+  }
+  return picked;
 }
 
 export function evaluateCluster(items: FeedItemRow[], now: number): ClusterEval {
@@ -78,8 +122,22 @@ interface IngestRow {
   image: string | null;
 }
 
-async function collect(ctx: StageCtx, batch: FeedRef[]): Promise<{ polled: number; failed: number; fetched: number; inserted: number }> {
-  const { env, now } = ctx;
+/**
+ * The feeds this tick may poll: search feeds only for the providers WEB_SEARCH allows, and one GDELT query at most
+ * (GDELT asks for one request every five seconds; the registry spaces them so the round-robin rarely needs this).
+ */
+export function pollable(batch: FeedRef[], allowed: ReadonlySet<string>): FeedRef[] {
+  let gdelt = 0;
+  return batch.filter((f) => {
+    if (f.kind !== 'search') return true;
+    if (!f.provider || !allowed.has(f.provider)) return false;
+    return f.provider !== 'gdelt' || ++gdelt <= 1;
+  });
+}
+
+async function collect(ctx: StageCtx, scheduled: FeedRef[]): Promise<{ polled: number; failed: number; fetched: number; inserted: number; searches: number; searchResults: number }> {
+  const { env, now, cfg } = ctx;
+  const batch = pollable(scheduled, cfg.webSearch);
   const settled = await Promise.allSettled(batch.map((f) => fetchFeed(f, now)));
 
   const pageFeedIds = batch.filter((f) => f.kind === 'page').map((f) => f.id);
@@ -95,6 +153,7 @@ async function collect(ctx: StageCtx, batch: FeedRef[]): Promise<{ polled: numbe
   const fetchedAt = nowIso(now);
   const rows = new Map<string, IngestRow>();
   let failed = 0;
+  let searchResults = 0;
 
   for (let i = 0; i < batch.length; i++) {
     const feed = batch[i] as FeedRef;
@@ -112,18 +171,21 @@ async function collect(ctx: StageCtx, batch: FeedRef[]): Promise<{ polled: numbe
       else if (published > now) published = now;
       const id = await sha(it.url);
       if (rows.has(id)) continue;
+      // A search result is credited to the publisher it came from (a registered outlet, or just its domain), not to the search.
+      const found = feed.kind === 'search' ? resolveSource(it.url) : null;
+      if (found) searchResults++;
       rows.set(id, {
         id,
-        source_id: feed.source.id,
-        source_name: feed.source.name,
+        source_id: found ? found.key : feed.source.id,
+        source_name: found ? found.name : feed.source.name,
         feed_id: feed.id,
         title: it.title,
         url: it.url,
         snippet: it.snippet,
         published_at: nowIso(published),
         fetched_at: fetchedAt,
-        via_social: feed.source.social ? 1 : 0,
-        georgia: feed.source.georgia ? 1 : 0,
+        via_social: found ? 0 : feed.source.social ? 1 : 0,
+        georgia: (feed.georgia ?? feed.source.georgia) ? 1 : 0,
         category_hint: feed.hint ? articleCategoryFor(feed.hint) : null,
         image: it.image ?? null,
       });
@@ -153,7 +215,7 @@ async function collect(ctx: StageCtx, batch: FeedRef[]): Promise<{ polled: numbe
         .run();
     }
   }
-  return { polled: batch.length, failed, fetched: rows.size, inserted };
+  return { polled: batch.length, failed, fetched: rows.size, inserted, searches: batch.filter((f) => f.kind === 'search').length, searchResults };
 }
 
 // ─── draft ──────────────────────────────────────────────────────────────────
@@ -191,11 +253,14 @@ export async function researchStage(ctx: StageCtx): Promise<Record<string, unkno
     .bind(MAX_OFFERS, nowIso(now - POOL_WINDOW_MS), POOL_LIMIT)
     .all<FeedItemRow>();
 
-  const clusters = clusterItems(pool)
+  const { results: recent } = await env.DB.prepare(`SELECT category, COUNT(*) AS n FROM articles WHERE created_at >= ?1 AND status != 'rejected' GROUP BY category`)
+    .bind(nowIso(now - 24 * 3600_000))
+    .all<{ category: string; n: number }>();
+  const eligible = clusterItems(pool)
     .map((items) => ({ items, ev: evaluateCluster(items, now) }))
-    .filter((c) => c.ev.eligible)
-    .sort((a, b) => b.ev.priority - a.ev.priority)
-    .slice(0, cfg.maxArticlesPerRun)
+    .filter((c) => c.ev.eligible && canReachThreshold(c.ev, cfg.publishThreshold))
+    .sort((a, b) => b.ev.priority - a.ev.priority);
+  const clusters = pickClusters(eligible, new Map(recent.map((r) => [r.category, r.n])), cfg.maxArticlesPerRun)
     .map(
       (c, i): Candidate => ({
         cid: `c${i + 1}`,
@@ -250,8 +315,8 @@ export async function researchStage(ctx: StageCtx): Promise<Record<string, unkno
     const ids = [...new Set(b.used_item_ids)].filter((id) => members.has(id));
     const items = ids.map((id) => members.get(id) as FeedItemRow);
     const ev = evaluateCluster(items, now);
-    if (items.length === 0 || !ev.eligible) {
-      logEvent(ctx, { articleId: null, stage: 'research', outcome: 'skipped', detail: { cluster: b.cluster_id, reason: 'cited items cannot meet the double-sourcing rule' } });
+    if (items.length === 0 || !ev.eligible || !canReachThreshold(ev, cfg.publishThreshold)) {
+      logEvent(ctx, { articleId: null, stage: 'research', outcome: 'skipped', detail: { cluster: b.cluster_id, reason: 'cited items cannot meet the double-sourcing rule or reach the publish threshold' } });
       continue;
     }
     if (created.length >= cfg.maxArticlesPerRun) break;
@@ -265,6 +330,13 @@ export async function researchStage(ctx: StageCtx): Promise<Record<string, unkno
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,0,0,0,'raw_research',NULL,?12,?12)`,
       ).bind(id, b.headline, b.summary, b.what_happened, b.why_it_matters, b.figures_dates, b.affected_entities, b.risks_uncertainty, b.category, georgia, JSON.stringify(linksFromCitations(ev.citations)), ts),
       env.DB.prepare(`UPDATE feed_items SET article_id = ?1 WHERE article_id IS NULL AND id IN (SELECT value FROM json_each(?2))`).bind(id, JSON.stringify(ids)),
+      env.DB.prepare(`INSERT OR IGNORE INTO article_importance (article_id, score, llm, publishers, created_at) VALUES (?1,?2,?3,?4,?5)`).bind(
+        id,
+        importanceScore({ llm: b.importance, publishers: ev.independent, primary: ev.hasPrimary, georgia: georgia === 1 }),
+        b.importance,
+        ev.independent,
+        ts,
+      ),
     );
     // The optional chart is kept only if every number in it is stated by the cited items or the draft.
     const chart = groundChart(

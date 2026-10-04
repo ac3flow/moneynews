@@ -6,6 +6,7 @@ import { parseLinks } from './pipeline/citations';
 import { SLOT_MS, TBILISI_OFFSET_MIN, TIMEZONE, dayRangeUtc, formatSlot, isDate, nextSlot, nowIso, parseSlotMinute, slotRangeUtc, tbilisiDate } from './time';
 import { ChartData } from './pipeline/schemas';
 import { stockPhotoFor } from './stock-photos';
+import { IMPORTANCE_DECAY_PER_HOUR, fallbackImportance } from './pipeline/importance';
 import { ARTICLE_CATEGORIES, type ArticleRow, type Env } from './types';
 
 // ─── tabs ───────────────────────────────────────────────────────────────────
@@ -58,6 +59,7 @@ interface ImageColumns {
   img_credit?: string | null;
   img_credit_url?: string | null;
   img_weight?: number | null;
+  imp_score?: number | null;
 }
 type Row = ArticleRow & KaColumns & ImageColumns;
 
@@ -92,6 +94,8 @@ export interface ArticleDto {
   georgia_related: boolean;
   sources: { title: string; url: string; trust_score: number; name: string; tier: TierId }[];
   trust_score: number;
+  /** 0-100: how much the story matters. Ranks the Top 10 and the front page; not the same as trust. */
+  importance: number;
   fact_checked: boolean;
   image: ImageDto;
   /** ISO-8601 UTC. The client renders it in Asia/Tbilisi. */
@@ -154,6 +158,7 @@ export function toDto(r: Row, rank?: number, lang: Lang = 'en', photos: PhotoPol
         tier: tierOf(l.trust_score, l.trust_score < 2),
       })),
     trust_score: r.trust_score,
+    importance: r.imp_score ?? fallbackImportance(r.trust_score),
     fact_checked: !!r.fact_checked,
     image: imageOf(r, photos),
     published_at: r.published_at,
@@ -251,8 +256,9 @@ const KA_COLUMNS = `t.headline AS k_headline, t.summary AS k_summary, t.what_hap
   t.figures_dates AS k_figures_dates, t.affected_entities AS k_affected_entities, t.risks_uncertainty AS k_risks_uncertainty`;
 
 // Aliased so the picture's columns can never collide with a column the filters name.
-const IMG_COLUMNS = 'ai.img_url, ai.img_credit, ai.img_credit_url, ai.img_weight';
-const IMG_JOIN = `LEFT JOIN (SELECT article_id AS img_article_id, url AS img_url, credit AS img_credit, credit_url AS img_credit_url, weight AS img_weight FROM article_images) ai ON ai.img_article_id = a.id`;
+const IMG_COLUMNS = 'ai.img_url, ai.img_credit, ai.img_credit_url, ai.img_weight, im.imp_score';
+const IMG_JOIN = `LEFT JOIN (SELECT article_id AS img_article_id, url AS img_url, credit AS img_credit, credit_url AS img_credit_url, weight AS img_weight FROM article_images) ai ON ai.img_article_id = a.id
+  LEFT JOIN (SELECT article_id AS imp_article_id, score AS imp_score FROM article_importance) im ON im.imp_article_id = a.id`;
 
 /** Georgian reads join the finished translation; a story without one is simply not listed in Georgian. */
 function source(lang: Lang): { select: string; from: string } {
@@ -261,11 +267,14 @@ function source(lang: Lang): { select: string; from: string } {
     : { select: `a.*, ${IMG_COLUMNS}`, from: `articles a ${IMG_JOIN}` };
 }
 
-export function buildListSql(q: ListQuery): { sql: string; binds: (string | number)[] } {
+export function buildListSql(q: ListQuery, now: number = Date.now()): { sql: string; binds: (string | number)[] } {
   const { where, binds, bind } = filters(q);
   const { select, from } = source(q.lang);
   if (q.tab === 'top10') {
-    return { sql: `SELECT ${select} FROM ${from} WHERE ${where.join(' AND ')} ORDER BY trust_score DESC, published_at DESC, id DESC LIMIT 10`, binds };
+    // What matters now: importance, minus a little for every hour since publication, so the list turns over
+    // without a day-old shock outranking this hour's news. Older stories without an importance row use a stand-in.
+    const rank = `COALESCE(im.imp_score, ROUND(trust_score * 0.6)) - ${IMPORTANCE_DECAY_PER_HOUR} * (julianday(${bind(nowIso(now))}) - julianday(published_at)) * 24`;
+    return { sql: `SELECT ${select} FROM ${from} WHERE ${where.join(' AND ')} ORDER BY ${rank} DESC, published_at DESC, id DESC LIMIT 10`, binds };
   }
   if (q.before) {
     const a = bind(q.before.at);

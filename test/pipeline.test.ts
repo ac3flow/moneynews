@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { numbersPreserved } from '../src/pipeline/numbers';
 import { PIPELINE_ORDER, runPipeline } from '../src/pipeline/run';
-import { selectFeedBatch } from '../src/pipeline/research';
+import { canReachThreshold, evaluateCluster, hintOf, pickClusters, selectFeedBatch, type ClusterEval } from '../src/pipeline/research';
 import { FEEDS } from '../src/registry/sources';
-import type { ArticleRow } from '../src/types';
+import type { ArticleRow, FeedItemRow } from '../src/types';
 import { handleApi } from '../src/api';
 import { fakeLlm, insertArticle, kaArticle, makeEnv, rows, rss, stubFeeds } from './helpers';
 
@@ -358,5 +358,118 @@ describe('story pictures', () => {
     expect(a.image.credit).toMatch(/ \/ Wikimedia Commons$/);
     expect(a.image.credit_url).toMatch(/^https:\/\/commons\.wikimedia\.org\/wiki\/File:/);
     expect((await articlesApi(env))[0].image).toEqual(a.image); // the same story keeps the same photo
+  });
+});
+
+describe('what gets drafted: balanced topics, reachable scores, importance', () => {
+  const item = (url: string, hint: string | null = null, title = 'A story'): FeedItemRow =>
+    ({ id: url, source_id: new URL(url).hostname, source_name: '', feed_id: 'f', title, url, snippet: null, published_at: new Date(NOW - 3600_000).toISOString(), fetched_at: '', via_social: 0, georgia: 0, category_hint: hint, offered_count: 0, article_id: null }) as FeedItemRow;
+  const cand = (priority: number, hint: string | null) => ({ items: [item(`https://x.example/${priority}`, hint)], ev: { priority } as unknown as ClusterEval });
+
+  it('hintOf is the topic most of a cluster\'s items came in under', () => {
+    expect(hintOf([item('https://a.example/1', 'Crypto'), item('https://b.example/1', 'Crypto'), item('https://c.example/1', 'Economics')])).toBe('Crypto');
+    expect(hintOf([item('https://a.example/1')])).toBeNull();
+  });
+
+  it('a topic with few recent stories is lifted, and every pick counts against its topic', () => {
+    const cs = [cand(6, 'Geopolitics'), cand(5.5, 'Geopolitics'), cand(4, 'Global Trade'), cand(3.5, 'VC & Startups'), cand(3, null)];
+    const picked = pickClusters(cs, new Map([['Geopolitics', 10]]), 3);
+    expect(picked.map((c) => c.ev.priority)).toEqual([4, 3.5, 6]); // trade and startups, which have nothing, ahead of a seventh geopolitics story
+    // with nothing published anywhere the strongest story leads, and the second pick moves to another topic
+    expect(pickClusters([cand(6, 'Geopolitics'), cand(5.5, 'Geopolitics'), cand(5, 'Crypto')], new Map(), 2).map((c) => c.ev.priority)).toEqual([6, 5]);
+    expect(pickClusters(cs, new Map(), 0)).toEqual([]);
+    expect(pickClusters([], new Map(), 3)).toEqual([]);
+  });
+
+  it('priority alone decides between stories with no topic hint, and fewer candidates than slots is fine', () => {
+    expect(pickClusters([cand(2, null), cand(7, null), cand(4, null)], new Map(), 5).map((c) => c.ev.priority)).toEqual([7, 4, 2]);
+  });
+
+  it('a cluster that cannot reach the publish threshold even with every claim backed is not worth drafting', () => {
+    const ev = (...urls: string[]) => evaluateCluster(urls.map((u) => item(u)), NOW);
+    const two = ev('https://blog-a.example/acme', 'https://blog-b.example/acme');
+    expect(two.eligible).toBe(true); // double-sourced...
+    expect(canReachThreshold(two, 60)).toBe(false); // ...but two unknown blogs top out at 51
+    expect(canReachThreshold(ev('https://www.coindesk.com/a', 'https://www.theblock.co/a'), 60)).toBe(true); // 68
+    expect(canReachThreshold(ev('https://www.federalreserve.gov/a'), 60)).toBe(true); // an official source on its own
+    expect(canReachThreshold(ev('https://www.wsj.com/a', 'https://blog-a.example/acme'), 60)).toBe(true);
+    expect(canReachThreshold(two, 50)).toBe(true); // it is the threshold that decides
+  });
+
+  const BING = FEEDS.find((f) => f.provider === 'bing' && f.hint === 'trade');
+  const acme = (domain: string) => `<item><title>Acme Corp announces record quarterly revenue of 4 billion dollars</title><link>http://www.bing.com/news/apiclick.aspx?url=${encodeURIComponent(`https://${domain}/acme-record-revenue`)}</link><description>Acme Corp said revenue reached a record 4 billion dollars.</description><pubDate>${hoursAgo(1)}</pubDate></item>`;
+  const bingFeed = (...domains: string[]) => stubFeeds({ [BING?.url ?? '']: `<rss><channel>${domains.map(acme).join('')}</channel></rss>` });
+
+  it('two unknown blogs agreeing do not cost a model call, a wire service joining them does', async () => {
+    const env = makeEnv();
+    bingFeed('blog-a.example', 'blog-b.example');
+    const llm = fakeLlm();
+    await runPipeline(env, { trigger: 'manual', now: NOW, stages: ['collect', 'research'], llm });
+    expect(rows(env, `SELECT 1 FROM feed_items WHERE feed_id = ?`, BING?.id)).toHaveLength(2);
+    expect(llm.calls).toEqual([]);
+
+    const env2 = makeEnv();
+    bingFeed('blog-a.example', 'blog-b.example', 'www.reuters.com');
+    const llm2 = fakeLlm();
+    await runPipeline(env2, { trigger: 'manual', now: NOW, stages: ['collect', 'research'], llm: llm2 });
+    expect(llm2.calls).toEqual(['research']);
+    const a = rows<{ source_links: string }>(env2, `SELECT source_links FROM articles`);
+    expect(a).toHaveLength(1);
+    expect(JSON.parse(a[0]?.source_links ?? '[]').map((l: { url: string }) => new URL(l.url).hostname).sort()).toEqual(['blog-a.example', 'blog-b.example', 'www.reuters.com']);
+  });
+
+  const feedsForTwoTopics = () =>
+    stubFeeds({
+      [FED]: rss([{ title: 'Federal Reserve issues FOMC statement holding rates at 4.25 percent', link: 'https://www.federalreserve.gov/newsevents/pressreleases/monetary20261003a.htm', pub: hoursAgo(2), desc: 'The Committee decided to maintain the target range at 4.25 percent.' }]),
+      [COINDESK]: rss([{ title: 'Bitcoin ETFs record $1.2 billion inflows as price tops $120,000', link: 'https://www.coindesk.com/markets/2026/10/03/bitcoin-etf-inflows', pub: hoursAgo(3) }]),
+      [THEBLOCK]: rss([{ title: 'Bitcoin ETF inflows reach $1.2 billion, price tops $120,000', link: 'https://www.theblock.co/post/1/bitcoin-etf-inflows', pub: hoursAgo(1) }]),
+    });
+  const seenTitles = (into: string[]) =>
+    fakeLlm({ research: (input) => (into.push(...input.clusters.flatMap((c: any) => c.items.map((i: any) => i.title))), { briefings: [] }) });
+
+  it('with one slot, the topic the site has none of beats the stronger story from a topic it has plenty of', async () => {
+    const env = makeEnv({ MAX_ARTICLES_PER_RUN: '1' });
+    for (let k = 0; k < 3; k++) insertArticle(env, { id: `eco${k}`, category: 'Economics', status: 'published', fact_checked: 1, created_at: new Date(NOW - 3600_000).toISOString() });
+    feedsForTwoTopics();
+    const seen: string[] = [];
+    await runPipeline(env, { trigger: 'manual', now: NOW, stages: ['collect', 'research'], llm: seenTitles(seen) });
+    expect(seen.some((t) => t.includes('Bitcoin'))).toBe(true);
+    expect(seen.some((t) => t.includes('Federal Reserve'))).toBe(false);
+  });
+
+  it('on a quiet day the stronger (official) story still goes first', async () => {
+    const env = makeEnv({ MAX_ARTICLES_PER_RUN: '1' });
+    feedsForTwoTopics();
+    const seen: string[] = [];
+    await runPipeline(env, { trigger: 'manual', now: NOW, stages: ['collect', 'research'], llm: seenTitles(seen) });
+    expect(seen.some((t) => t.includes('Federal Reserve'))).toBe(true);
+    expect(seen.some((t) => t.includes('Bitcoin'))).toBe(false);
+  });
+
+  it('the agent\'s rating, the publisher count and the official source become each story\'s importance', async () => {
+    const env = makeEnv();
+    feedsForTwoTopics();
+    const llm = fakeLlm({
+      research: (input) => ({
+        briefings: input.clusters.map((c: any) => ({
+          cluster_id: c.cluster_id, headline: `Briefing on: ${c.items[0].title}`.slice(0, 150), summary: `Summary of the reporting about ${c.items[0].title}.`.slice(0, 300),
+          what_happened: `According to the sources, ${c.items[0].title}. ${c.items[0].snippet ?? ''}`.trim().padEnd(60, '.'), why_it_matters: 'This could matter for markets and businesses that depend on the outcome.',
+          figures_dates: 'Reported rate: 4.25', affected_entities: 'Markets, Investors', risks_uncertainty: 'Details may change as more information is confirmed.',
+          category: 'Economics', georgia_related: false, importance: 80, used_item_ids: c.items.map((i: any) => i.id),
+        })),
+      }),
+    });
+    await runPipeline(env, { trigger: 'manual', now: NOW, stages: ['collect', 'research'], llm });
+    const imp = rows<{ score: number; llm: number; publishers: number; source_links: string }>(env, `SELECT i.score, i.llm, i.publishers, a.source_links FROM article_importance i JOIN articles a ON a.id = i.article_id`);
+    const byLink = (frag: string) => imp.find((r) => r.source_links.includes(frag));
+    expect(byLink('federalreserve.gov')).toMatchObject({ llm: 80, publishers: 1, score: 55 }); // 44 + 3 + 8 official
+    expect(byLink('coindesk.com')).toMatchObject({ llm: 80, publishers: 2, score: 56 }); // 44 + 12
+  });
+
+  it('a missing or nonsense rating from the model counts as middling instead of failing the briefing', async () => {
+    const env = makeEnv();
+    feedsForTwoTopics();
+    await runPipeline(env, { trigger: 'manual', now: NOW, stages: ['collect', 'research'], llm: fakeLlm() }); // the default handler gives no importance
+    expect(rows<{ llm: number }>(env, `SELECT llm FROM article_importance`).map((r) => r.llm)).toEqual([50, 50]);
   });
 });

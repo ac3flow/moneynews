@@ -151,3 +151,9 @@ export function insertTranslation(env: Env, articleId: string, o: Record<string,
     .prepare(`INSERT INTO article_translations (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`)
     .run(...cols.map((c) => (row as Record<string, unknown>)[c]));
 }
+
+export function insertImportance(env: Env, articleId: string, score: number): void {
+  (env.DB as unknown as { raw: { prepare(s: string): { run(...p: unknown[]): unknown } } }).raw
+    .prepare(`INSERT INTO article_importance (article_id, score, llm, publishers, created_at) VALUES (?,?,?,?,?)`)
+    .run(articleId, score, score, 2, '2026-10-03T10:00:00.000Z');
+}

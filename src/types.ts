@@ -17,6 +17,8 @@ export interface Env {
   FEEDS_PER_RUN?: string;
   MAX_ARTICLES_PER_RUN?: string;
   PUBLISH_THRESHOLD?: string;
+  /** Open-web news search providers to use, comma separated: 'bing', 'gdelt' (default both), or 'off'. */
+  WEB_SEARCH?: string;
   /** 'all' (default): show the picture a source supplied. 'primary': only from official sources. 'off': stock photos only. */
   SOURCE_PHOTOS?: string;
 }

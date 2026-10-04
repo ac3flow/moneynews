@@ -54,8 +54,9 @@
     "GEMINI_MODEL_KA": "gemini-3.8-flash",
 
     "PIPELINE_MODE": "staged",    // "staged" (Free) or "single" (Paid)
-    "FEEDS_PER_RUN": "25",        // sources per collect: 25 -> 7 groups of about 23, all 159 feeds covered about every 17 minutes
-    "MAX_ARTICLES_PER_RUN": "3",  // new drafts per run, and the batch size of every later stage
+    "FEEDS_PER_RUN": "25",        // sources per collect: 25 -> 13 groups of about 23, all 301 feeds (including the 41 web-search queries) covered about every 32 minutes
+    "WEB_SEARCH": "bing,gdelt",   // open-web news search: "bing", "gdelt", both, or "off". Bing News is for personal, non-commercial use under its terms
+    "MAX_ARTICLES_PER_RUN": "4",  // new drafts per run, and the batch size of every later stage
     "PUBLISH_THRESHOLD": "60",    // minimum trust score (0-100) to publish
     "SOURCE_PHOTOS": "all"        // story pictures: "all" = the one a source supplied (credited, hotlinked), "primary" = only from official sources, "off" = public-domain stock photos only
   }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { handleApi, parseFigures, parseListQuery } from '../src/api';
 import { STOCK_PHOTOS, stockPhotoFor } from '../src/stock-photos';
-import { insertArticle, insertImage, insertTranslation, makeEnv } from './helpers';
+import { insertArticle, insertImage, insertImportance, insertTranslation, makeEnv } from './helpers';
 
 type Env = ReturnType<typeof makeEnv>;
 
@@ -36,16 +36,46 @@ describe('GET /api/articles', () => {
     expect(a1.published_at).toBe('2026-10-03T10:00:00.000Z'); // UTC on the wire
   });
 
-  it('Top 10 is strictly trust_score DESC LIMIT 10 (ties: newest first), with ranks', async () => {
+  it('Top 10 ranks by importance, not trust, newest first on ties, with ranks', async () => {
     const env = makeEnv();
-    const scores = [55, 91, 70, 88, 91, 62, 99, 70, 81, 76, 64, 93];
-    scores.forEach((s, i) => pub(env, `t${String(i).padStart(2, '0')}`, `2026-10-03T${String(i).padStart(2, '0')}:00:00.000Z`, { trust_score: s }));
+    const ago = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
+    // trust runs the opposite way to importance on purpose
+    const rows: [string, number, number][] = [['i1', 55, 95], ['i2', 91, 90], ['i3', 70, 80], ['i4', 88, 70], ['i5', 99, 60], ['i6', 62, 50], ['i7', 93, 40], ['i8', 70, 30], ['i9', 81, 20], ['i10', 76, 10], ['i11', 64, 5], ['i12', 66, 5]];
+    rows.forEach(([id, trust, importance], k) => {
+      pub(env, id, ago(1 + k * 0.001), { trust_score: trust });
+      insertImportance(env, id, importance);
+    });
     const { body } = await get(env, '/api/articles?tab=top10&limit=3');
     expect(body.articles).toHaveLength(10);
-    expect(body.articles.map((a: any) => a.trust_score)).toEqual([99, 93, 91, 91, 88, 81, 76, 70, 70, 64]);
+    expect(body.articles.map((a: any) => a.id)).toEqual(['i1', 'i2', 'i3', 'i4', 'i5', 'i6', 'i7', 'i8', 'i9', 'i10']);
+    expect(body.articles.map((a: any) => a.importance)).toEqual([95, 90, 80, 70, 60, 50, 40, 30, 20, 10]);
     expect(body.articles.map((a: any) => a.rank)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-    expect(body.articles[2].id).toBe('t04'); // tie at 91: newer (04:00) before older (01:00)
+    expect(body.articles[0].trust_score).toBe(55); // the most important story is not the most trusted
     expect(body.nextBefore).toBeNull();
+  });
+
+  it('Top 10 favours what matters now: an old shock gives way to fresh news of lesser size', async () => {
+    const env = makeEnv();
+    const ago = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
+    pub(env, 'old', ago(60), { trust_score: 95 });
+    insertImportance(env, 'old', 90); // 90 - 0.8 x 60 = 42
+    pub(env, 'fresh', ago(1), { trust_score: 60 });
+    insertImportance(env, 'fresh', 55); // 55 - 0.8 = 54
+    pub(env, 'fresher', ago(0.2), { trust_score: 60 });
+    insertImportance(env, 'fresher', 55);
+    const { body } = await get(env, '/api/articles?tab=top10');
+    expect(body.articles.map((a: any) => a.id)).toEqual(['fresher', 'fresh', 'old']);
+  });
+
+  it('stories from before importance existed are ranked by a stand-in from their trust score', async () => {
+    const env = makeEnv();
+    const ago = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
+    pub(env, 'legacy', ago(1), { trust_score: 90 }); // stand-in 54
+    pub(env, 'rated', ago(1), { trust_score: 60 });
+    insertImportance(env, 'rated', 70);
+    const { body } = await get(env, '/api/articles?tab=top10');
+    expect(body.articles.map((a: any) => [a.id, a.importance])).toEqual([['rated', 70], ['legacy', 54]]);
+    expect((await get(env, '/api/articles/rated')).body.article.importance).toBe(70);
   });
 
   it('filters Georgia Focus by flag and categories by tab', async () => {

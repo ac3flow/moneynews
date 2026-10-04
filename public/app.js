@@ -486,10 +486,12 @@ async function viewHome() {
     return parts;
   }
 
-  // Lead: the most trusted stories of the last day and a half (or of everything, if it is a slow day).
+  // Lead: the stories that matter most in the last day and a half (or of everything, if it is a slow day).
   const fresh = list.filter((a) => serverNow() - Date.parse(a.published_at) < 36 * 3600_000);
   const pool = fresh.length >= 3 ? fresh : list;
-  const ranked = [...pool].sort((a, b) => b.trust_score - a.trust_score || (a.published_at < b.published_at ? 1 : -1));
+  // What matters most right now: importance, less a little for every hour since publication (the same rule as the Top 10).
+  const lead = (a) => (a.importance ?? 0) - 0.8 * Math.max(0, (serverNow() - Date.parse(a.published_at)) / 3600_000);
+  const ranked = [...pool].sort((a, b) => lead(b) - lead(a) || (a.published_at < b.published_at ? 1 : -1));
   const [top, ...rest] = ranked;
   const side = rest.slice(0, 3);
   const feats = rest.slice(3, 6);
@@ -819,6 +821,8 @@ function viewAbout() {
       h('ul', { class: 'weights' }, weights.map(([w, k]) => h('li', {}, h('b', { text: w }), h('span', { text: t(k) })))),
       h('h2', { class: 'h-md sp-top-lg', text: t('howGatesTitle') }),
       h('p', { text: t('howGates') }),
+      h('h2', { class: 'h-md sp-top-lg', text: t('howSearchTitle') }),
+      h('p', { text: t('howSearch') }),
     ),
   );
 }

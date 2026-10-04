@@ -98,6 +98,16 @@ CREATE TABLE IF NOT EXISTS article_images (
     created_at TEXT NOT NULL
 );
 
+-- How much each story matters (0-100), used to rank the front page and the Top 10. Written when the story is drafted:
+-- the Research agent's judgement, the number of independent publishers, official source and Georgia bonuses (importance.ts).
+CREATE TABLE IF NOT EXISTS article_importance (
+    article_id TEXT PRIMARY KEY,
+    score INTEGER NOT NULL,             -- the combined 0-100 score
+    llm INTEGER NOT NULL,               -- the Research agent's own rating
+    publishers INTEGER NOT NULL,        -- independent publishers among the sources
+    created_at TEXT NOT NULL
+);
+
 -- One row per pipeline execution (cron or manual). Doubles as the run lock (one live run per scope).
 CREATE TABLE IF NOT EXISTS pipeline_runs (
     run_id TEXT PRIMARY KEY,

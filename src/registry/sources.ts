@@ -48,12 +48,23 @@ export function tierOf(weight: number, social = false): TierId {
   return 'unclassified';
 }
 
+export type SearchProvider = 'bing' | 'gdelt';
+
 export interface FeedDef {
   url: string;
-  /** 'rss' = RSS/Atom. 'page' = HTML listing; links whose path matches `pattern` become items. */
-  kind: 'rss' | 'page';
+  /**
+   * 'rss' = RSS/Atom. 'page' = HTML listing; links whose path matches `pattern` become items.
+   * 'search' = a query against an open-web news index (`provider`): each result is a different publisher,
+   * so it is credited to that publisher, not to the feed.
+   */
+  kind: 'rss' | 'page' | 'search';
   pattern?: string;
   hint?: SourceCategoryId;
+  provider?: SearchProvider;
+  /** Search feeds: the query, for logs and tests. */
+  query?: string;
+  /** Search feeds: the results are about Georgia (overrides the source's flag). */
+  georgia?: boolean;
 }
 
 export interface Source {
@@ -69,6 +80,17 @@ export interface Source {
 
 const rss = (url: string, hint?: SourceCategoryId): FeedDef => ({ url, kind: 'rss', hint });
 const page = (url: string, pattern: string, hint?: SourceCategoryId): FeedDef => ({ url, kind: 'page', pattern, hint });
+// Open-web news search. Bing News returns about ten results a query as RSS (the real article link is inside its
+// tracking link); GDELT indexes news from tens of thousands of publishers, free, and asks for one request per
+// five seconds, so at most one GDELT feed runs per collect. Both can be switched off with WEB_SEARCH.
+const bing = (query: string, hint: SourceCategoryId, georgia?: boolean): FeedDef => ({
+  url: `https://www.bing.com/news/search?q=${encodeURIComponent(query).replace(/%20/g, '+')}&format=RSS&setlang=en-US&qft=sortbydate%3d%221%22+interval%3d%227%22`,
+  kind: 'search', provider: 'bing', query, hint, ...(georgia ? { georgia } : {}),
+});
+const gdelt = (query: string, hint: SourceCategoryId, georgia?: boolean): FeedDef => ({
+  url: `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(`${query} sourcelang:english`)}&mode=artlist&format=json&maxrecords=40&timespan=1d&sort=datedesc`,
+  kind: 'search', provider: 'gdelt', query, hint, ...(georgia ? { georgia } : {}),
+});
 
 interface Opts { aliases?: string[]; feeds?: FeedDef[]; social?: boolean; georgia?: boolean }
 type Def = [name: string, weight: number, domains: string, opts?: Opts];
@@ -468,11 +490,152 @@ const DEFS: Def[] = [
   ['Presa', C, 'presa.ge', { georgia: true }],
   ['Business Media', S, 'businessmedia.ge', { georgia: true }],
 
+
+  // ── Wider coverage (October 2026): trade, VC, marketing, real estate, crypto, geopolitics, AI ──────────────
+  // Feeds probed on 2026-10-04: each answered with parseable items from the last ten days. Weights follow the tiers above.
+  // Global trade, shipping, commodities
+  ['Supply Chain Brain', S, 'supplychainbrain.com', { feeds: [rss('https://www.supplychainbrain.com/rss/articles', 'trade')] }], // (v)
+  ['Splash247', S, 'splash247.com', { feeds: [rss('https://splash247.com/feed/', 'trade')] }], // (v)
+  ['gCaptain', S, 'gcaptain.com', { feeds: [rss('https://gcaptain.com/feed/', 'trade')] }], // (v)
+  ['Container News', S, 'container-news.com', { feeds: [rss('https://container-news.com/feed/', 'trade')] }], // (v)
+  ['Rigzone', S, 'rigzone.com', { feeds: [rss('https://www.rigzone.com/news/rss/rigzone_latest.aspx', 'trade')] }], // (v)
+  ['Offshore Energy', S, 'offshore-energy.biz', { feeds: [rss('https://www.offshore-energy.biz/feed/', 'trade')] }], // (v)
+  ['Hellenic Shipping News', S, 'hellenicshippingnews.com', { feeds: [rss('https://www.hellenicshippingnews.com/feed/', 'trade')] }], // (v)
+  ['Seatrade Maritime', S, 'seatrade-maritime.com', { feeds: [rss('https://www.seatrade-maritime.com/rss.xml', 'trade')] }], // (v)
+  ['Logistics Manager', S, 'logisticsmanager.com', { feeds: [rss('https://www.logisticsmanager.com/feed/', 'trade')] }], // (v)
+  ['Air Cargo News', S, 'aircargonews.net', { feeds: [rss('https://www.aircargonews.net/feed', 'trade')] }], // (v)
+  // VC, startups, innovation
+  ['Tech.eu', S, 'tech.eu', { feeds: [rss('https://tech.eu/feed', 'startups')] }], // (v)
+  ['AlleyWatch', S, 'alleywatch.com', { feeds: [rss('https://www.alleywatch.com/feed/', 'startups')] }], // (v)
+  ['BetaKit', S, 'betakit.com', { feeds: [rss('https://betakit.com/feed/', 'startups')] }], // (v)
+  ['Inc42', S, 'inc42.com', { feeds: [rss('https://inc42.com/feed/', 'startups')] }], // (v)
+  ['e27', S, 'e27.co', { feeds: [rss('https://e27.co/feed/', 'startups')] }], // (v)
+  ['TechCabal', S, 'techcabal.com', { feeds: [rss('https://techcabal.com/feed/', 'startups')] }], // (v)
+  ['Wamda', S, 'wamda.com', { feeds: [rss('https://www.wamda.com/feed', 'startups')] }], // (v)
+  ['SmartCompany', S, 'smartcompany.com.au', { feeds: [rss('https://www.smartcompany.com.au/feed/', 'startups')] }], // (v)
+  ['Seedcamp', C, 'seedcamp.com', { feeds: [rss('https://seedcamp.com/feed/', 'startups')] }], // (v)
+  ['Startups Magazine', S, 'startupsmagazine.co.uk', { feeds: [rss('https://startupsmagazine.co.uk/feed', 'startups')] }], // (v)
+  ['The Next Web', S, 'thenextweb.com', { feeds: [rss('https://thenextweb.com/feed', 'startups')] }], // (v)
+  ['Geekwire', S, 'geekwire.com', { feeds: [rss('https://www.geekwire.com/feed/', 'startups')] }], // (v)
+  // Marketing, advertising, retail
+  ['Social Media Today', S, 'socialmediatoday.com', { feeds: [rss('https://www.socialmediatoday.com/feeds/news/', 'marketing')] }], // (v)
+  ['Mumbrella', S, 'mumbrella.com.au', { feeds: [rss('https://mumbrella.com.au/feed', 'marketing')] }], // (v)
+  ['PPC Land', S, 'ppc.land', { feeds: [rss('https://ppc.land/rss/', 'marketing')] }], // (v)
+  ['Retail Dive', S, 'retaildive.com', { feeds: [rss('https://www.retaildive.com/feeds/news/', 'marketing')] }], // (v)
+  ['Modern Retail', S, 'modernretail.co', { feeds: [rss('https://www.modernretail.co/feed/', 'marketing')] }], // (v)
+  ['Retail Gazette', S, 'retailgazette.co.uk', { feeds: [rss('https://www.retailgazette.co.uk/feed/', 'marketing')] }], // (v)
+  ['Practical Ecommerce', S, 'practicalecommerce.com', { feeds: [rss('https://www.practicalecommerce.com/feed', 'marketing')] }], // (v)
+  // Real estate
+  ['Connect CRE', S, 'connectcre.com', { feeds: [rss('https://www.connectcre.com/feed/', 'real_estate')] }], // (v)
+  ['Rismedia', S, 'rismedia.com', { feeds: [rss('https://www.rismedia.com/feed/', 'real_estate')] }], // (v)
+  ['Real Estate Investing Today', N, 'realestateinvestingtoday.com', { feeds: [rss('https://www.realestateinvestingtoday.com/feed/', 'real_estate')] }], // (v)
+  ['Mortgage Professional', S, 'mpamag.com', { feeds: [rss('https://www.mpamag.com/us/rss', 'real_estate')] }], // (v)
+  // Crypto
+  ['NewsBTC', C, 'newsbtc.com', { feeds: [rss('https://www.newsbtc.com/feed/', 'crypto')] }], // (v)
+  ['AMBCrypto', C, 'ambcrypto.com', { feeds: [rss('https://ambcrypto.com/feed/', 'crypto')] }], // (v)
+  ['Bitcoinist', C, 'bitcoinist.com', { feeds: [rss('https://bitcoinist.com/feed/', 'crypto')] }], // (v)
+  ['Protos', S, 'protos.com', { feeds: [rss('https://protos.com/feed/', 'crypto')] }], // (v)
+  ['Crypto News', C, 'crypto.news', { feeds: [rss('https://crypto.news/feed/', 'crypto')] }], // (v)
+  ['CoinCentral', C, 'coincentral.com', { feeds: [rss('https://coincentral.com/feed/', 'crypto')] }], // (v)
+  ['Cryptonomist', C, 'cryptonomist.ch', { feeds: [rss('https://en.cryptonomist.ch/feed/', 'crypto')] }], // (v)
+  ['99Bitcoins', N, '99bitcoins.com', { feeds: [rss('https://99bitcoins.com/feed/', 'crypto')] }], // (v)
+  // Geopolitics and world affairs
+  ['CBS News World', S, 'cbsnews.com', { feeds: [rss('https://www.cbsnews.com/latest/rss/world', 'geopolitics')] }], // (v)
+  ['ABC News International', S, 'abcnews.go.com', { feeds: [rss('https://abcnews.go.com/abcnews/internationalheadlines', 'geopolitics')] }], // (v)
+  ['Sky News World', S, 'news.sky.com', { feeds: [rss('https://feeds.skynews.com/feeds/rss/world.xml', 'geopolitics')] }], // (v)
+  ['Foreign Affairs', S, 'foreignaffairs.com', { feeds: [rss('https://www.foreignaffairs.com/rss.xml', 'geopolitics')] }], // (v)
+  ['OC Media', S, 'oc-media.org', { feeds: [rss('https://oc-media.org/feed/', 'geopolitics')] }], // (v)
+  ['JAMnews', S, 'jam-news.net', { feeds: [rss('https://jam-news.net/feed/', 'geopolitics')] }], // (v)
+  ['Atlantic Council', C, 'atlanticcouncil.org', { feeds: [rss('https://www.atlanticcouncil.org/feed/', 'geopolitics')] }], // (v)
+  ['Crisis Group', C, 'crisisgroup.org', { feeds: [rss('https://www.crisisgroup.org/rss.xml', 'geopolitics')] }], // (v)
+  ['War on the Rocks', C, 'warontherocks.com', { feeds: [rss('https://warontherocks.com/feed/', 'geopolitics')] }], // (v)
+  ['Al-Monitor', S, 'al-monitor.com', { feeds: [rss('https://www.al-monitor.com/rss', 'geopolitics')] }], // (v)
+  ['Middle East Eye', S, 'middleeasteye.net', { feeds: [rss('https://www.middleeasteye.net/rss', 'geopolitics')] }], // (v)
+  ['Kyiv Independent', S, 'kyivindependent.com', { feeds: [rss('https://kyivindependent.com/news-archive/rss/', 'geopolitics')] }], // (v)
+  ['Meduza', S, 'meduza.io', { feeds: [rss('https://meduza.io/rss/en/all', 'geopolitics')] }], // (v)
+  ['South China Morning Post', S, 'scmp.com', { feeds: [rss('https://www.scmp.com/rss/91/feed', 'geopolitics'), rss('https://www.scmp.com/rss/92/feed', 'economics')] }], // (v)
+  ['Japan Times', S, 'japantimes.co.jp', { feeds: [rss('https://www.japantimes.co.jp/feed/', 'geopolitics')] }], // (v)
+  ['Dawn', S, 'dawn.com', { feeds: [rss('https://www.dawn.com/feeds/home', 'geopolitics')] }], // (v)
+  ['Africa News', S, 'africanews.com', { feeds: [rss('https://www.africanews.com/feed/rss', 'geopolitics')] }], // (v)
+  ['Mercopress', S, 'mercopress.com', { feeds: [rss('https://en.mercopress.com/rss', 'geopolitics')] }], // (v)
+  ['UK Foreign Office', P, 'gov.uk', { feeds: [rss('https://www.gov.uk/government/organisations/foreign-commonwealth-development-office.atom', 'geopolitics')] }], // (v)
+  ['The Diplomat', S, 'thediplomat.com', { feeds: [rss('https://thediplomat.com/feed/', 'geopolitics')] }], // (v)
+  // AI and technology
+  ['The Register', S, 'theregister.com', { feeds: [rss('https://www.theregister.com/headlines.atom', 'ai_tech')] }], // (v)
+  ['TechRadar', S, 'techradar.com', { feeds: [rss('https://www.techradar.com/rss', 'ai_tech')] }], // (v)
+  ["Tom's Hardware", S, 'tomshardware.com', { feeds: [rss('https://www.tomshardware.com/feeds/all', 'ai_tech')] }], // (v)
+  ['Semiconductor Engineering', S, 'semiengineering.com', { feeds: [rss('https://semiengineering.com/feed/', 'ai_tech')] }], // (v)
+  ['MarkTechPost', S, 'marktechpost.com', { feeds: [rss('https://www.marktechpost.com/feed/', 'ai_tech')] }], // (v)
+  ['Google DeepMind', C, 'deepmind.google', { feeds: [rss('https://deepmind.google/blog/rss.xml', 'ai_tech')] }], // (v)
+  ['AWS Machine Learning Blog', C, 'aws.amazon.com', { feeds: [rss('https://aws.amazon.com/blogs/machine-learning/feed/', 'ai_tech')] }], // (v)
+  ['9to5Google', S, '9to5google.com', { feeds: [rss('https://9to5google.com/feed/', 'ai_tech')] }], // (v)
+  ['9to5Mac', S, '9to5mac.com', { feeds: [rss('https://9to5mac.com/feed/', 'ai_tech')] }], // (v)
+  ['Android Authority', S, 'androidauthority.com', { feeds: [rss('https://www.androidauthority.com/feed/', 'ai_tech')] }], // (v)
+  ['Slashdot', N, 'slashdot.org', { feeds: [rss('https://rss.slashdot.org/Slashdot/slashdotMain', 'ai_tech')] }], // (v)
+  ['Rest of World', S, 'restofworld.org', { feeds: [rss('https://restofworld.org/feed/latest', 'ai_tech')] }], // (v)
+  // Economics, central banks, institutions
+  ['Reserve Bank of India', P, 'rbi.org.in', { feeds: [rss('https://www.rbi.org.in/pressreleases_rss.xml', 'economics')] }], // (v)
+  ['Bank of Japan', P, 'boj.or.jp', { feeds: [rss('https://www.boj.or.jp/en/rss/whatsnew.xml', 'economics')] }], // (v)
+  ['Swiss National Bank', P, 'snb.ch', { feeds: [rss('https://www.snb.ch/public/en/rss/pressrel', 'economics')] }], // (v)
+  ['VoxEU', C, 'cepr.org', { feeds: [rss('https://cepr.org/rss/vox-content', 'economics')] }], // (v)
+  // Markets
+  ['CFTC Press', P, 'cftc.gov', { feeds: [rss('https://www.cftc.gov/RSS/RSSGP/rssgp.xml', 'investments')] }], // (v)
+
+  // ── Open-web search ────────────────────────────────────────────────────────────────────────────────────
+  // Not publishers: pseudo-sources that carry the search feeds. Each result is credited to its own publisher.
+  // GDELT first and together, so the round-robin never puts two of them in one collect.
+  ['GDELT search', X, '', { feeds: [
+    gdelt('(inflation OR "central bank" OR "interest rates" OR GDP OR recession)', 'economics'),
+    gdelt('(tariffs OR "supply chain" OR "trade deal" OR "export controls" OR "container rates")', 'trade'),
+    gdelt('("venture capital" OR "funding round" OR "series A" OR "series B" OR "startup raises")', 'startups'),
+    gdelt('("ad spend" OR "advertising revenue" OR "marketing strategy" OR "brand marketing")', 'marketing'),
+    gdelt('("real estate" OR mortgage OR "housing market" OR "commercial property")', 'real_estate'),
+    gdelt('(bitcoin OR ethereum OR crypto OR stablecoin OR "digital assets")', 'crypto'),
+    gdelt('("artificial intelligence" OR semiconductor OR OpenAI OR Nvidia OR "data center")', 'ai_tech'),
+    gdelt('(sanctions OR ceasefire OR summit OR diplomacy OR "security council")', 'geopolitics'),
+    gdelt('(Tbilisi OR "Georgian government" OR "National Bank of Georgia" OR Batumi)', 'georgia', true),
+  ] }],
+  ['Bing News search', X, '', { feeds: [
+    bing('global trade tariffs', 'trade'), bing('supply chain disruption shipping', 'trade'), bing('container freight rates ports', 'trade'), bing('export import trade deal', 'trade'),
+    bing('startup funding round raises', 'startups'), bing('venture capital investment', 'startups'), bing('seed series A funding', 'startups'), bing('unicorn startup valuation', 'startups'),
+    bing('advertising industry news', 'marketing'), bing('digital marketing trends', 'marketing'), bing('brand campaign agency', 'marketing'), bing('social media advertising platform', 'marketing'),
+    bing('real estate market prices', 'real_estate'), bing('mortgage rates housing market', 'real_estate'), bing('commercial real estate office', 'real_estate'), bing('property development investment', 'real_estate'),
+    bing('bitcoin price market', 'crypto'), bing('ethereum stablecoin regulation', 'crypto'), bing('crypto exchange ETF', 'crypto'),
+    bing('artificial intelligence companies news', 'ai_tech'), bing('semiconductor chips supply', 'ai_tech'), bing('big tech earnings', 'ai_tech'),
+    bing('inflation interest rates central bank', 'economics'), bing('GDP growth economy forecast', 'economics'), bing('stock market earnings', 'investments'),
+    bing('sanctions diplomacy talks', 'geopolitics'), bing('geopolitics security alliance', 'geopolitics'), bing('elections government crisis', 'geopolitics'),
+    bing('Georgia Tbilisi economy business', 'georgia', true), bing('National Bank of Georgia lari', 'georgia', true), bing('Georgia country trade exports', 'georgia', true), bing('Georgian government European Union', 'georgia', true),
+  ] }],
+
   // Social signals: discovery only, never sufficient on their own.
   ['Hacker News', SOCIAL, 'news.ycombinator.com', { social: true, feeds: [rss('https://news.ycombinator.com/rss')] }], // (v)
   ['Reddit', SOCIAL, 'reddit.com redd.it', { social: true }],
   ['X', X, 'x.com twitter.com', { social: true, aliases: ['Twitter'] }],
 ];
+
+// Feeds added to sources that were already listed (a second section feed, a blog next to the news site).
+const EXTRA_FEEDS = new Map<string, FeedDef[]>([
+  ['Asian Development Bank', [rss('https://www.adb.org/rss/news', 'economics')]],
+  ['Bitcoin Magazine', [rss('https://bitcoinmagazine.com/.rss/full/', 'crypto')]],
+  ['Chainalysis', [rss('https://www.chainalysis.com/blog/feed/', 'crypto')]],
+  ['Cointelegraph', [rss('https://cointelegraph.com/rss/tag/markets', 'crypto')]],
+  ['Euronews', [rss('https://www.euronews.com/rss?level=theme&name=business', 'economics')]],
+  ['Fast Company', [rss('https://www.fastcompany.com/technology/rss', 'ai_tech')]],
+  ['Global Trade Magazine', [rss('https://www.globaltrademag.com/feed/', 'trade')]],
+  ['Investing.com', [rss('https://www.investing.com/rss/news.rss', 'investments')]],
+  ['MarTech', [rss('https://martech.org/feed/', 'marketing'), rss('https://marketingland.com/feed', 'marketing')]],
+  ['Mining.com', [rss('https://www.mining.com/feed/', 'trade')]],
+  ['Neil Patel', [rss('https://neilpatel.com/blog/feed/', 'marketing')]],
+  ['OilPrice.com', [rss('https://oilprice.com/rss/main', 'trade')]],
+  ['Redfin Research', [rss('https://www.redfin.com/news/feed/', 'real_estate')]],
+  ['SEJ', [rss('https://www.searchenginejournal.com/feed/', 'marketing')]],
+  ['Seeking Alpha', [rss('https://seekingalpha.com/market_currents.xml', 'investments')]],
+  ['TechCrunch', [rss('https://techcrunch.com/category/venture/feed/', 'startups')]],
+  ['Techmeme', [rss('https://www.techmeme.com/feed.xml', 'ai_tech')]],
+  ['UN News', [rss('https://news.un.org/feed/subscribe/en/news/topic/economic-development/feed/rss.xml', 'trade'), rss('https://news.un.org/feed/subscribe/en/news/topic/climate-change/feed/rss.xml', 'geopolitics')]],
+  ['YC', [rss('https://www.ycombinator.com/blog/rss', 'startups')]],
+  ['Zillow Research', [rss('https://www.zillow.com/research/feed/', 'real_estate')]],
+]);
 
 export const SOURCES: Source[] = DEFS.map(([name, weight, domains, opts = {}]) => ({
   id: slug(name),
@@ -480,7 +643,7 @@ export const SOURCES: Source[] = DEFS.map(([name, weight, domains, opts = {}]) =
   weight,
   domains: domains.split(/\s+/).filter(Boolean),
   aliases: opts.aliases ?? [],
-  feeds: opts.feeds ?? [],
+  feeds: [...(opts.feeds ?? []), ...(EXTRA_FEEDS.get(name) ?? [])],
   social: opts.social ?? false,
   georgia: opts.georgia ?? false,
 }));

@@ -3,6 +3,8 @@ import { nowIso } from '../time';
 import type { Llm } from './llm';
 
 export interface PipelineConfig {
+  /** Open-web search providers that may run (WEB_SEARCH). */
+  webSearch: ReadonlySet<'bing' | 'gdelt'>;
   feedsPerRun: number;
   maxArticlesPerRun: number;
   publishThreshold: number;
@@ -14,8 +16,14 @@ const int = (v: string | undefined, dflt: number, min: number, max: number): num
   return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : dflt;
 };
 
+const searchProviders = (v: string | undefined): ReadonlySet<'bing' | 'gdelt'> => {
+  const wanted = (v ?? 'bing,gdelt').toLowerCase().split(/[\s,]+/);
+  return new Set((['bing', 'gdelt'] as const).filter((p) => wanted.includes(p)));
+};
+
 export function readConfig(env: Env): PipelineConfig {
   return {
+    webSearch: searchProviders(env.WEB_SEARCH),
     feedsPerRun: int(env.FEEDS_PER_RUN, 10, 1, 400),
     maxArticlesPerRun: int(env.MAX_ARTICLES_PER_RUN, 3, 1, 10),
     publishThreshold: int(env.PUBLISH_THRESHOLD, 60, 0, 100),
