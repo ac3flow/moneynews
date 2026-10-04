@@ -16,6 +16,7 @@ export interface RawItem {
 
 export const UA = 'Mozilla/5.0 (compatible; MoneyNews-agent/1.0)';
 const FETCH_TIMEOUT_MS = 8000;
+const GDELT_TIMEOUT_MS = 20000; // GDELT's own docs note it can be slow under load; RSS feeds don't need this long
 // A feed is re-polled every few minutes, so only the newest items can be new. Fewer items = less CPU.
 const MAX_ITEMS_PER_FEED = 8;
 const PAGE_CLIP = 150_000;
@@ -296,9 +297,10 @@ async function readHead(res: Response, max: number): Promise<string> {
 
 /** `since`: items published before this (ms epoch) are dropped without being parsed. */
 export async function fetchFeed(feed: FeedRef, now: number = Date.now(), since = Number.NEGATIVE_INFINITY): Promise<RawItem[]> {
+  const timeout = feed.kind === 'search' && feed.provider === 'gdelt' ? GDELT_TIMEOUT_MS : FETCH_TIMEOUT_MS;
   const res = await fetch(feed.url, {
     headers: { 'user-agent': UA, accept: feed.kind === 'rss' ? 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*' : 'text/html,*/*' },
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeout),
     redirect: 'follow',
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
