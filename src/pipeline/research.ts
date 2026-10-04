@@ -17,7 +17,7 @@ import type { FeedItemRow } from '../types';
 import { citationFromItem, linksFromCitations } from './citations';
 import { groundChart } from './chart';
 import { clusterItems } from './cluster';
-import { logEvent, type StageCtx } from './context';
+import { logEvent, mark, type StageCtx } from './context';
 import { importanceScore } from './importance';
 import { fetchFeed, sha, type RawItem } from './feeds';
 import { RESEARCH_SYSTEM } from './prompts';
@@ -26,7 +26,7 @@ import { scoreArticle, type Citation } from './scoring';
 
 const MAX_ITEM_AGE_MS = 72 * 3600_000; // ignore very old feed items on ingest
 const POOL_WINDOW_MS = 36 * 3600_000; // how long an unused item stays eligible
-const POOL_LIMIT = 400; // newest unused items considered for clustering; titles only, so the rows stay small
+const POOL_LIMIT = 240; // newest unused items considered for clustering; titles only, so the rows stay small (clustering CPU grows with this)
 const MAX_OFFERS = 3; // times an item may be sent to the LLM without becoming an article
 const MAX_ITEMS_PER_CLUSTER = 6;
 const BASELINE_AGE_MS = 7 * 86_400_000; // first sight of a page feed: mark existing links as old news
@@ -135,10 +135,11 @@ export function pollable(batch: FeedRef[], allowed: ReadonlySet<string>): FeedRe
   });
 }
 
+const COLLECT_GROUP = 6; // feeds fetched, parsed and stored together; a run cut short keeps the groups it finished
+
 async function collect(ctx: StageCtx, scheduled: FeedRef[]): Promise<{ polled: number; failed: number; fetched: number; inserted: number; searches: number; searchResults: number }> {
   const { env, now, cfg } = ctx;
   const batch = pollable(scheduled, cfg.webSearch);
-  const settled = await Promise.allSettled(batch.map((f) => fetchFeed(f, now)));
 
   const pageFeedIds = batch.filter((f) => f.kind === 'page').map((f) => f.id);
   const known = new Set<string>();
@@ -151,71 +152,87 @@ async function collect(ctx: StageCtx, scheduled: FeedRef[]): Promise<{ polled: n
 
   const cutoff = now - MAX_ITEM_AGE_MS;
   const fetchedAt = nowIso(now);
-  const rows = new Map<string, IngestRow>();
+  const seen = new Set<string>();
   let failed = 0;
   let searchResults = 0;
-
-  for (let i = 0; i < batch.length; i++) {
-    const feed = batch[i] as FeedRef;
-    const res = settled[i] as PromiseSettledResult<RawItem[]>;
-    if (res.status === 'rejected') {
-      failed++;
-      logEvent(ctx, { articleId: null, stage: 'feed', outcome: 'error', detail: { feed: feed.id, url: feed.url, error: String(res.reason?.message ?? res.reason) } });
-      continue;
-    }
-    const baseline = feed.kind === 'page' && !known.has(feed.id);
-    for (const it of res.value) {
-      let published = Date.parse(it.published);
-      if (baseline) published = now - BASELINE_AGE_MS;
-      else if (published < cutoff) continue;
-      else if (published > now) published = now;
-      const id = await sha(it.url);
-      if (rows.has(id)) continue;
-      // A search result is credited to the publisher it came from (a registered outlet, or just its domain), not to the search.
-      const found = feed.kind === 'search' ? resolveSource(it.url) : null;
-      if (found) searchResults++;
-      rows.set(id, {
-        id,
-        source_id: found ? found.key : feed.source.id,
-        source_name: found ? found.name : feed.source.name,
-        feed_id: feed.id,
-        title: it.title,
-        url: it.url,
-        snippet: it.snippet,
-        published_at: nowIso(published),
-        fetched_at: fetchedAt,
-        via_social: found ? 0 : feed.source.social ? 1 : 0,
-        georgia: (feed.georgia ?? feed.source.georgia) ? 1 : 0,
-        category_hint: feed.hint ? articleCategoryFor(feed.hint) : null,
-        image: it.image ?? null,
-      });
-    }
-  }
-
+  let fetched = 0;
   let inserted = 0;
-  if (rows.size) {
-    const out = await env.DB.prepare(
-      `INSERT OR IGNORE INTO feed_items (id, source_id, source_name, feed_id, title, url, snippet, published_at, fetched_at, via_social, georgia, category_hint)
-       SELECT json_extract(value,'$.id'), json_extract(value,'$.source_id'), json_extract(value,'$.source_name'), json_extract(value,'$.feed_id'),
-              json_extract(value,'$.title'), json_extract(value,'$.url'), json_extract(value,'$.snippet'), json_extract(value,'$.published_at'),
-              json_extract(value,'$.fetched_at'), json_extract(value,'$.via_social'), json_extract(value,'$.georgia'), json_extract(value,'$.category_hint')
-       FROM json_each(?1)`,
-    )
-      .bind(JSON.stringify([...rows.values()]))
-      .run();
-    inserted = out.meta.changes ?? 0;
-    // Pictures only for items that are new; an INSERT OR IGNORE keeps the first one seen.
-    if (inserted > 0 && [...rows.values()].some((x) => x.image)) {
-      await env.DB.prepare(
-        `INSERT OR IGNORE INTO item_images (item_id, url)
-         SELECT json_extract(value,'$.id'), json_extract(value,'$.image') FROM json_each(?1)
-         WHERE json_extract(value,'$.image') IS NOT NULL AND json_extract(value,'$.id') IN (SELECT id FROM feed_items WHERE fetched_at = ?2)`,
-      )
-        .bind(JSON.stringify([...rows.values()].filter((x) => x.image).map((x) => ({ id: x.id, image: x.image }))), fetchedAt)
-        .run();
+
+  // Workers Free gives each cron run ~10 ms of CPU, so the work is cut into small groups: each is fetched in
+  // parallel, parsed, and written before the next starts. A run that is stopped partway has still stored what it did.
+  for (let g = 0; g < batch.length; g += COLLECT_GROUP) {
+    const group = batch.slice(g, g + COLLECT_GROUP);
+    const settled = await Promise.allSettled(group.map((f) => fetchFeed(f, now, cutoff)));
+    const rows = new Map<string, IngestRow>();
+
+    for (let i = 0; i < group.length; i++) {
+      const feed = group[i] as FeedRef;
+      const res = settled[i] as PromiseSettledResult<RawItem[]>;
+      if (res.status === 'rejected') {
+        failed++;
+        logEvent(ctx, { articleId: null, stage: 'feed', outcome: 'error', detail: { feed: feed.id, url: feed.url, error: String(res.reason?.message ?? res.reason) } });
+        continue;
+      }
+      const baseline = feed.kind === 'page' && !known.has(feed.id);
+      for (const it of res.value) {
+        let published = Date.parse(it.published);
+        if (baseline) published = now - BASELINE_AGE_MS;
+        else if (published < cutoff) continue;
+        else if (published > now) published = now;
+        const id = await sha(it.url);
+        if (seen.has(id)) continue;
+        seen.add(id);
+        // A search result is credited to the publisher it came from (a registered outlet, or just its domain), not to the search.
+        const found = feed.kind === 'search' ? resolveSource(it.url) : null;
+        if (found) searchResults++;
+        rows.set(id, {
+          id,
+          source_id: found ? found.key : feed.source.id,
+          source_name: found ? found.name : feed.source.name,
+          feed_id: feed.id,
+          title: it.title,
+          url: it.url,
+          snippet: it.snippet,
+          published_at: nowIso(published),
+          fetched_at: fetchedAt,
+          via_social: found ? 0 : feed.source.social ? 1 : 0,
+          georgia: (feed.georgia ?? feed.source.georgia) ? 1 : 0,
+          category_hint: feed.hint ? articleCategoryFor(feed.hint) : null,
+          image: it.image ?? null,
+        });
+      }
     }
+
+    fetched += rows.size;
+    if (rows.size) inserted += await storeItems(env, [...rows.values()], fetchedAt);
+    await mark(ctx, `collect ${Math.min(g + COLLECT_GROUP, batch.length)}/${batch.length} feeds, ${inserted} new items`);
   }
-  return { polled: batch.length, failed, fetched: rows.size, inserted, searches: batch.filter((f) => f.kind === 'search').length, searchResults };
+  return { polled: batch.length, failed, fetched, inserted, searches: batch.filter((f) => f.kind === 'search').length, searchResults };
+}
+
+/** Add new items to the pool (one statement), then their pictures (one more, only when there are any). Returns the number of new items. */
+async function storeItems(env: StageCtx['env'], list: IngestRow[], fetchedAt: string): Promise<number> {
+  const out = await env.DB.prepare(
+    `INSERT OR IGNORE INTO feed_items (id, source_id, source_name, feed_id, title, url, snippet, published_at, fetched_at, via_social, georgia, category_hint)
+     SELECT json_extract(value,'$.id'), json_extract(value,'$.source_id'), json_extract(value,'$.source_name'), json_extract(value,'$.feed_id'),
+            json_extract(value,'$.title'), json_extract(value,'$.url'), json_extract(value,'$.snippet'), json_extract(value,'$.published_at'),
+            json_extract(value,'$.fetched_at'), json_extract(value,'$.via_social'), json_extract(value,'$.georgia'), json_extract(value,'$.category_hint')
+     FROM json_each(?1)`,
+  )
+    .bind(JSON.stringify(list))
+    .run();
+  const inserted = out.meta.changes ?? 0;
+  // Pictures only for items that are new; an INSERT OR IGNORE keeps the first one seen.
+  if (inserted > 0 && list.some((x) => x.image)) {
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO item_images (item_id, url)
+       SELECT json_extract(value,'$.id'), json_extract(value,'$.image') FROM json_each(?1)
+       WHERE json_extract(value,'$.image') IS NOT NULL AND json_extract(value,'$.id') IN (SELECT id FROM feed_items WHERE fetched_at = ?2)`,
+    )
+      .bind(JSON.stringify(list.filter((x) => x.image).map((x) => ({ id: x.id, image: x.image }))), fetchedAt)
+      .run();
+  }
+  return inserted;
 }
 
 // ─── draft ──────────────────────────────────────────────────────────────────

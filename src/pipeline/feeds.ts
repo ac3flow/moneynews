@@ -17,8 +17,9 @@ export interface RawItem {
 export const UA = 'Mozilla/5.0 (compatible; MoneyNews-agent/1.0)';
 const FETCH_TIMEOUT_MS = 8000;
 // A feed is re-polled every few minutes, so only the newest items can be new. Fewer items = less CPU.
-const MAX_ITEMS_PER_FEED = 12;
+const MAX_ITEMS_PER_FEED = 8;
 const PAGE_CLIP = 150_000;
+const BODY_CLIP = 90_000; // bytes of a feed worth reading: the newest items come first, and decoding long bodies costs CPU
 
 export async function sha(str: string): Promise<string> {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
@@ -42,6 +43,7 @@ export function normUrl(u: string): string {
 const NAMED: Record<string, string> = { lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', amp: '&', rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“', ndash: '–', mdash: '—', hellip: '…' };
 
 export function decodeEntities(s: string): string {
+  if (!s.includes('&') && !s.includes('<![CDATA[')) return s; // most titles and descriptions have nothing to decode
   return s
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
     .replace(/&#x([0-9a-f]+);/gi, (_, h: string) => safeCodePoint(parseInt(h, 16)))
@@ -140,20 +142,21 @@ function linkOf(block: string): string {
 
 // Workers Free allows ~10 ms of CPU per invocation, so parsing must stay cheap: stop scanning after
 // MAX_ITEMS_PER_FEED items (OpenAI's feed has >1,000) and clip long bodies before stripping markup.
-const RAW_FIELD_CLIP = 2500;
+const RAW_FIELD_CLIP = 1800;
 const clipRaw = (s: string): string => (s.length > RAW_FIELD_CLIP ? s.slice(0, RAW_FIELD_CLIP) : s);
 
-export function parseFeed(xml: string, now: number = Date.now()): RawItem[] {
+export function parseFeed(xml: string, now: number = Date.now(), since = Number.NEGATIVE_INFINITY): RawItem[] {
   const out: RawItem[] = [];
   const blocks = /<(item|entry)[\s>][\s\S]*?<\/\1>/gi;
   let m: RegExpExecArray | null;
   for (let n = 0; n < MAX_ITEMS_PER_FEED && (m = blocks.exec(xml)); n++) {
     const b = m[0];
+    // The date comes first: an item older than `since` is skipped before any markup is stripped.
+    const d = new Date(stripHtml(tag(b, 'pubDate') || tag(b, 'published') || tag(b, 'updated') || tag(b, 'dc:date')));
+    if (d.getTime() < since) continue;
     const title = stripHtml(tag(b, 'title'));
     const link = linkOf(b);
     if (!title || !/^https?:\/\//i.test(link)) continue;
-    const dateRaw = tag(b, 'pubDate') || tag(b, 'published') || tag(b, 'updated') || tag(b, 'dc:date');
-    const d = new Date(stripHtml(dateRaw));
     const published = Number.isNaN(d.getTime()) ? new Date(now) : d;
     const body = tag(b, 'description') || tag(b, 'summary') || tag(b, 'content:encoded') || tag(b, 'content');
     const snippet = stripHtml(clipRaw(body)).slice(0, 600);
@@ -269,7 +272,30 @@ export function parseGdelt(body: string, now: number = Date.now()): RawItem[] {
   return out;
 }
 
-export async function fetchFeed(feed: FeedRef, now: number = Date.now()): Promise<RawItem[]> {
+/** The first `max` bytes of a response as text; the rest is never downloaded or decoded. */
+async function readHead(res: Response, max: number): Promise<string> {
+  const reader = res.body?.getReader();
+  if (!reader) return (await res.text()).slice(0, max);
+  const parts: Uint8Array[] = [];
+  let got = 0;
+  while (got < max) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parts.push(value);
+    got += value.length;
+  }
+  await reader.cancel().catch(() => undefined);
+  const all = new Uint8Array(got);
+  let at = 0;
+  for (const p of parts) {
+    all.set(p, at);
+    at += p.length;
+  }
+  return new TextDecoder().decode(all.subarray(0, Math.min(got, max)));
+}
+
+/** `since`: items published before this (ms epoch) are dropped without being parsed. */
+export async function fetchFeed(feed: FeedRef, now: number = Date.now(), since = Number.NEGATIVE_INFINITY): Promise<RawItem[]> {
   const res = await fetch(feed.url, {
     headers: { 'user-agent': UA, accept: feed.kind === 'rss' ? 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*' : 'text/html,*/*' },
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
@@ -282,8 +308,9 @@ export async function fetchFeed(feed: FeedRef, now: number = Date.now()): Promis
     return feed.provider === 'gdelt' ? parseGdelt(text, now) : parseBingNews(text, now);
   }
   // Page listings can be 300 KB of markup; the newest links come first, so the head of the page is enough (and CPU is scarce).
-  const body = feed.kind === 'page' ? (await res.text()).slice(0, PAGE_CLIP) : await res.text();
-  const items = feed.kind === 'rss' ? parseFeed(body, now) : parsePage(body, feed.url, feed.pattern ?? '.', now);
-  if (items.length === 0) throw new Error('no items parsed');
+  const body = feed.kind === 'page' ? (await readHead(res, PAGE_CLIP)) : await readHead(res, BODY_CLIP);
+  const items = feed.kind === 'rss' ? parseFeed(body, now, since) : parsePage(body, feed.url, feed.pattern ?? '.', now);
+  // A feed whose items are all older than `since` is quiet, not broken.
+  if (items.length === 0 && !(feed.kind === 'rss' && /<(item|entry)[\s>]/i.test(body))) throw new Error('no items parsed');
   return items;
 }

@@ -494,7 +494,8 @@ async function meta(env: Env): Promise<Response> {
   const [counts, last, run] = await Promise.all([
     env.DB.prepare(`SELECT category, COUNT(*) AS n, SUM(georgia_related) AS g FROM articles WHERE ${PUBLISHED} GROUP BY category`).all<{ category: string; n: number; g: number }>(),
     env.DB.prepare(`SELECT MAX(published_at) AS t FROM articles WHERE ${PUBLISHED}`).first<{ t: string | null }>(),
-    env.DB.prepare(`SELECT MAX(finished_at) AS t FROM pipeline_runs WHERE finished_at IS NOT NULL`).first<{ t: string | null }>(),
+    // A run that did its work. One that yielded to another run, or was found stopped halfway, says nothing about the site being live.
+    env.DB.prepare(`SELECT MAX(finished_at) AS t FROM pipeline_runs WHERE status = 'ok' AND finished_at IS NOT NULL AND COALESCE(stats, '') NOT LIKE '{"skipped"%'`).first<{ t: string | null }>(),
   ]);
   const byCategory: Record<string, number> = Object.fromEntries(ARTICLE_CATEGORIES.map((c) => [c, 0]));
   let total = 0;

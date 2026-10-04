@@ -220,6 +220,29 @@ describe('orchestration', () => {
     expect((await runPipeline(env, { trigger: 'cron', now: NOW + 1000, llm: null })).status).toBe('ok');
   });
 
+  it('closes a run left running past the lock window as an error and keeps how far it got', async () => {
+    const env = makeEnv();
+    stubFeeds({});
+    const raw = env.DB.raw;
+    const add = raw.prepare(`INSERT INTO pipeline_runs (run_id, scope, trigger, started_at, status, stats) VALUES (?, 'collect', 'cron', ?, 'running', ?)`);
+    add.run('dead', new Date(NOW - 6 * 60_000).toISOString(), JSON.stringify({ progress: 'collect 6/14 feeds, 31 new items' }));
+    add.run('live', new Date(NOW - 60_000).toISOString(), JSON.stringify({ progress: 'collect started' }));
+    await runPipeline(env, { trigger: 'cron', stages: ['edit'], now: NOW, llm: null });
+    const [dead, live] = ['dead', 'live'].map((id) => rows<{ status: string; stats: string; finished_at: string | null }>(env, `SELECT status, stats, finished_at FROM pipeline_runs WHERE run_id = '${id}'`)[0]);
+    expect(dead?.status).toBe('error');
+    expect(dead?.finished_at).not.toBeNull();
+    expect(JSON.parse(dead?.stats ?? '{}')).toMatchObject({ last_progress: 'collect 6/14 feeds, 31 new items' });
+    expect(live?.status).toBe('running'); // a run inside the window is still alive
+  });
+
+  it('a collect run stores what it found in groups and notes its progress', async () => {
+    const env = makeEnv({ FEEDS_PER_RUN: '400' });
+    stubFeeds({ [WIRED]: rss([{ title: 'First story from Wired about robots', link: 'https://www.wired.com/story/robots', pub: hoursAgo(1) }]) });
+    const r = await runPipeline(env, { trigger: 'manual', stages: ['collect'], now: NOW, llm: null });
+    expect(r.status).toBe('ok');
+    expect(rows<{ n: number }>(env, `SELECT COUNT(*) n FROM feed_items WHERE source_id LIKE '%wired%'`)[0]?.n).toBeGreaterThan(0);
+  });
+
   it('round-robin feed batches cover every feed exactly once per cycle', () => {
     const per = 10;
     const groups = Math.ceil(FEEDS.length / per);
