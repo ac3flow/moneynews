@@ -13,9 +13,9 @@
 import { FEEDS, articleCategoryFor, type FeedRef } from '../registry/sources';
 import { resolveSource } from '../registry/trust';
 import { SLOT_MS, nowIso } from '../time';
-import type { FeedItemRow } from '../types';
+import { ARTICLE_CATEGORIES, type FeedItemRow } from '../types';
 import { citationFromItem, linksFromCitations } from './citations';
-import { groundChart } from './chart';
+import { groundCharts } from './chart';
 import { clusterItems } from './cluster';
 import { logEvent, mark, type StageCtx } from './context';
 import { importanceScore } from './importance';
@@ -50,10 +50,12 @@ export interface ClusterEval {
   priority: number;
 }
 
+const CATEGORIES: ReadonlySet<string> = new Set(ARTICLE_CATEGORIES);
+
 /** The article category a cluster most likely belongs to: the hint most of its items carry from the feeds that found them. */
 export function hintOf(items: FeedItemRow[]): string | null {
   const tally = new Map<string, number>();
-  for (const i of items) if (i.category_hint) tally.set(i.category_hint, (tally.get(i.category_hint) ?? 0) + 1);
+  for (const i of items) if (i.category_hint && CATEGORIES.has(i.category_hint)) tally.set(i.category_hint, (tally.get(i.category_hint) ?? 0) + 1); // a hint from a removed topic means nothing
   return [...tally].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 }
 
@@ -306,7 +308,7 @@ export async function researchStage(ctx: StageCtx): Promise<Record<string, unkno
   const payload = {
     clusters: clusters.map((c) => ({
       cluster_id: c.cid,
-      category_hint: c.items.find((i) => i.category_hint)?.category_hint ?? null,
+      category_hint: hintOf(c.items),
       items: c.items.map((i) => ({
         id: i.id,
         source: citationFromItem(i).name,
@@ -355,18 +357,18 @@ export async function researchStage(ctx: StageCtx): Promise<Record<string, unkno
         ts,
       ),
     );
-    // The optional chart is kept only if every number in it is stated by the cited items or the draft.
-    const chart = groundChart(
-      b.chart,
+    // The graphs are kept only if every number in each is stated by the cited items or the draft.
+    const proposed = b.charts.length ? b.charts : b.chart ? [b.chart] : [];
+    const { kept, dropped } = groundCharts(
+      proposed,
       // the day each item was published counts as stated: a story about something launched today may date it so
       [...items.map((i) => `${i.title}\n${i.snippet ?? ''}\n${i.published_at.slice(0, 10)}`), b.headline, b.summary, b.what_happened, b.figures_dates].join('\n'),
       now,
     );
-    if (chart) {
-      statements.push(env.DB.prepare(`INSERT OR IGNORE INTO article_charts (article_id, lang, data, created_at) VALUES (?1, 'en', ?2, ?3)`).bind(id, JSON.stringify(chart), ts));
-    } else if (b.chart) {
-      logEvent(ctx, { articleId: id, stage: 'research', outcome: 'skipped', detail: { reason: 'chart_not_grounded' } });
+    if (kept.length) {
+      statements.push(env.DB.prepare(`INSERT OR IGNORE INTO article_charts (article_id, lang, data, created_at) VALUES (?1, 'en', ?2, ?3)`).bind(id, JSON.stringify(kept), ts));
     }
+    if (dropped) logEvent(ctx, { articleId: id, stage: 'research', outcome: 'skipped', detail: { reason: 'chart_not_grounded', dropped, kept: kept.length } });
     // The story's picture is the one that came with its most credible cited source.
     const lead = [...items].sort((a, b) => citationFromItem(b).weight - citationFromItem(a).weight).find((i) => i.image_url);
     if (lead?.image_url) {

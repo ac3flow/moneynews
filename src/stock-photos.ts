@@ -3,7 +3,7 @@
 // (Public domain, CC0 or "No restrictions"), so none needs attribution, but the credit is shown anyway.
 // They are hotlinked from thumb.wikimedia.org at 960-1280 px; nothing is copied into this repository.
 
-export type StockTopic = 'tech' | 'economy' | 'crypto' | 'marketing' | 'property' | 'trade' | 'world' | 'startups' | 'general' | 'georgia';
+export type StockTopic = 'tech' | 'economy' | 'crypto' | 'property' | 'trade' | 'world' | 'startups' | 'general' | 'georgia';
 
 export interface StockPhoto {
   url: string;
@@ -33,13 +33,6 @@ export const STOCK_PHOTOS: Record<StockTopic, StockPhoto[]> = {
     { url: "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c2/Italian_States-Piacenza_1626_2_Doppie.jpg/1280px-Italian_States-Piacenza_1626_2_Doppie.jpg", title: "Italian States-Piacenza 1626 2 Doppie", author: "Italian States, Piacenza", license: "Public domain", page: "https://commons.wikimedia.org/wiki/File:Italian_States-Piacenza_1626_2_Doppie.jpg" },
     { url: "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a2/Two_20kr_gold_coins.png/1280px-Two_20kr_gold_coins.png", title: "Two 20kr gold coins", author: "Anonimski", license: "CC0", page: "https://commons.wikimedia.org/wiki/File:Two_20kr_gold_coins.png" },
     { url: "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/44/Branch_Mint_Sovereigns.jpg/1280px-Branch_Mint_Sovereigns.jpg", title: "Branch Mint Sovereigns", author: "Snd3054", license: "CC0", page: "https://commons.wikimedia.org/wiki/File:Branch_Mint_Sovereigns.jpg" },
-  ],
-  marketing: [
-    { url: "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/0a/Times_Square_%2823307389095%29.jpg/1280px-Times_Square_%2823307389095%29.jpg", title: "Times Square (23307389095)", author: "Alex Liivet from Chester, United Kingdom", license: "CC0", page: "https://commons.wikimedia.org/wiki/File:Times_Square_(23307389095).jpg" },
-    { url: "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/06/Times_Square_%2822939432289%29.jpg/1280px-Times_Square_%2822939432289%29.jpg", title: "Times Square (22939432289)", author: "Alex Liivet from Chester, United Kingdom", license: "CC0", page: "https://commons.wikimedia.org/wiki/File:Times_Square_(22939432289).jpg" },
-    { url: "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/ed/Times_Square_at_dusk.jpg/960px-Times_Square_at_dusk.jpg", title: "Times Square at dusk", author: "Storylanding", license: "CC0", page: "https://commons.wikimedia.org/wiki/File:Times_Square_at_dusk.jpg" },
-    { url: "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/58/Billboard_advertising_Saunders%27_malt_extract%2C_Sydney%2C_ca._1930_-_photographer_Sam_Hood_-_Flickr_-_State_Library_of_New_South_Wales_collection.jpg/1280px-Billboard_advertising_Saunders%27_malt_extract%2C_Sydney%2C_ca._1930_-_photographer_Sam_Hood_-_Flickr_-_State_Library_of_New_South_Wales_collection.jpg", title: "Billboard advertising Saunders' malt extract, Sydney, ca. 1930 - photographer Sam Hood - Flickr - State Library of New South Wales collection", author: "State Library of New South Wales from Australia", license: "No restrictions", page: "https://commons.wikimedia.org/wiki/File:Billboard_advertising_Saunders%27_malt_extract,_Sydney,_ca._1930_-_photographer_Sam_Hood_-_Flickr_-_State_Library_of_New_South_Wales_collection.jpg" },
-    { url: "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/f3/Fire_Extinguisher_Mfg._Co.%2C_advertising_poster%2C_ca._1890.jpg/1280px-Fire_Extinguisher_Mfg._Co.%2C_advertising_poster%2C_ca._1890.jpg", title: "Fire Extinguisher Mfg. Co., advertising poster, ca. 1890", author: "Fire Extinguisher Manufacturing Company", license: "Public domain", page: "https://commons.wikimedia.org/wiki/File:Fire_Extinguisher_Mfg._Co.,_advertising_poster,_ca._1890.jpg" },
   ],
   property: [
     { url: "https://thumb.wikimedia.org/wikipedia/commons/thumb/6/67/New_residential_buildings_with_balconies_above_the_shops_of_the_shopping_center_Oostpoort_in_the_district_Amsterdam-Oost%3B_free_architecture_photo_by_Fons_Heijnsbroek%2C_January_2014.tif/lossy-page1-1280px-thumbnail.tif.jpg", title: "New residential buildings with balconies above the shops of the shopping center Oostpoort in the district Amsterdam-Oost; free architecture photo by Fons Heijnsbroek, January 2014", author: "Fons Heijnsbroek", license: "CC0", page: "https://commons.wikimedia.org/wiki/File:New_residential_buildings_with_balconies_above_the_shops_of_the_shopping_center_Oostpoort_in_the_district_Amsterdam-Oost;_free_architecture_photo_by_Fons_Heijnsbroek,_January_2014.tif" },
@@ -87,7 +80,6 @@ const TOPIC_OF: Record<string, StockTopic> = {
   'AI & Tech': 'tech',
   Economics: 'economy',
   Crypto: 'crypto',
-  Marketing: 'marketing',
   'Real Estate': 'property',
   'Global Trade': 'trade',
   Geopolitics: 'world',

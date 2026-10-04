@@ -30,9 +30,10 @@ describe('GET /api/articles', () => {
     expect(a1.figures).toEqual([{ label: 'Rate', value: '4.25%' }, { label: 'Next meeting', value: '28 October' }, { label: '', value: 'plain line' }]);
     expect(a1.affected_entities).toEqual(['Fed', 'Markets']);
     expect(a1.sources).toEqual([
-      { title: 'Fed statement', url: 'https://www.federalreserve.gov/x', trust_score: 5, name: 'Fed', tier: 'primary' },
-      { title: 'HN', url: 'https://news.ycombinator.com/item?id=1', trust_score: 1.5, name: 'Hacker News', tier: 'social' },
-    ]);
+      { title: 'Fed statement', url: 'https://www.federalreserve.gov/x', name: 'Fed', tier: 'primary' },
+      { title: 'HN', url: 'https://news.ycombinator.com/item?id=1', name: 'Hacker News', tier: 'social' },
+    ]); // a tier label, never a number
+    expect(a1).not.toHaveProperty('trust_score');
     expect(a1.published_at).toBe('2026-10-03T10:00:00.000Z'); // UTC on the wire
   });
 
@@ -50,7 +51,8 @@ describe('GET /api/articles', () => {
     expect(body.articles.map((a: any) => a.id)).toEqual(['i1', 'i2', 'i3', 'i4', 'i5', 'i6', 'i7', 'i8', 'i9', 'i10']);
     expect(body.articles.map((a: any) => a.importance)).toEqual([95, 90, 80, 70, 60, 50, 40, 30, 20, 10]);
     expect(body.articles.map((a: any) => a.rank)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-    expect(body.articles[0].trust_score).toBe(55); // the most important story is not the most trusted
+    expect(body.articles[0].id).toBe('i1'); // the most important story is not the most trusted
+    expect(body.articles[0]).not.toHaveProperty('trust_score');
     expect(body.nextBefore).toBeNull();
   });
 
@@ -212,7 +214,7 @@ describe('Georgian (lang=ka)', () => {
     expect(body.lang).toBe('ka');
     expect(body.articles.map((a: any) => a.id)).toEqual(['a1']);
     const a = body.articles[0];
-    expect(a).toMatchObject({ lang: 'ka', headline: 'ფედმა განაკვეთი არ შეცვალა', trust_score: 90 });
+    expect(a).toMatchObject({ lang: 'ka', headline: 'ფედმა განაკვეთი არ შეცვალა' });
     expect(a.figures).toEqual([{ label: 'განაკვეთი', value: '4.25%' }]);
     expect(a.affected_entities).toEqual(['ფედი', 'ბაზრები']);
     expect(a.sources[0].name).toBe('Reuters'); // sources are shared across languages
@@ -270,14 +272,15 @@ describe('other endpoints', () => {
     expect((await get(env, '/api/slots')).status).toBe(200); // defaults to today in Tbilisi
   });
 
-  it('GET /api/articles/:id returns the article and its trust breakdown', async () => {
+  it('GET /api/articles/:id returns the article with no trust payload', async () => {
     const env = makeEnv();
     pub(env, 'x1', '2026-10-03T10:00:00.000Z');
     env.DB.raw.prepare(`INSERT INTO pipeline_events (article_id, stage, outcome, detail, created_at) VALUES ('x1','fact_check','ok',?, 'now')`).run(JSON.stringify({ breakdown: { credibility: 40 }, claims: { total: 3 }, independentSources: 2 }));
     const r = await get(env, '/api/articles/x1');
     expect(r.status).toBe(200);
     expect(r.body.article.id).toBe('x1');
-    expect(r.body.trust.breakdown.credibility).toBe(40);
+    expect(r.body.trust).toBeUndefined();
+    expect(r.body.article).not.toHaveProperty('trust_score');
     expect((await get(env, '/api/articles/missing')).status).toBe(404);
     expect((await get(env, '/api/articles/bad%20id')).status).toBe(400);
   });
@@ -289,7 +292,7 @@ describe('other endpoints', () => {
     const { body } = await get(env, '/api/meta');
     expect(body.counts).toMatchObject({ total: 2, georgia: 1 });
     expect(body.counts.byCategory.Crypto).toBe(2);
-    expect(body.tabs.map((t: any) => t.label)).toEqual(['Top 10', 'All', 'Georgia Focus', 'AI & Tech', 'Economics', 'Crypto', 'Marketing', 'Real Estate', 'Global Trade', 'Geopolitics', 'VC & Startups']);
+    expect(body.tabs.map((t: any) => t.label)).toEqual(['Top 10', 'All', 'Georgia Focus', 'AI & Tech', 'Economics', 'Crypto', 'Real Estate', 'Global Trade', 'Geopolitics', 'VC & Startups']);
     expect(Date.parse(body.nextRunAt) % 300_000).toBe(0);
     expect(Date.parse(body.nextRunAt)).toBeGreaterThan(Date.parse(body.now));
     expect(body.lastPublishedAt).toBe('2026-10-03T11:00:00.000Z');
@@ -404,7 +407,7 @@ describe('parseFigures', () => {
 
 const exec = (env: Env, sql: string, ...p: unknown[]) => (env.DB as unknown as { raw: { prepare(s: string): { run(...p: unknown[]): unknown } } }).raw.prepare(sql).run(...p);
 
-describe('GET /api/articles/:id: chart and reporting timeline', () => {
+describe('GET /api/articles/:id: charts', () => {
   const CHART = { title: 'Fed rate path', unit: '%', items: [{ label: 'Now', value: 4.25 }, { label: 'Target', value: 3.5 }] };
   const KA_CHART = { title: 'ფედის განაკვეთი', unit: '%', items: [{ label: 'ახლა', value: 4.25 }, { label: 'მიზანი', value: 3.5 }] };
 
@@ -420,33 +423,41 @@ describe('GET /api/articles/:id: chart and reporting timeline', () => {
     exec(env, `INSERT INTO feed_items (id, source_id, source_name, feed_id, title, url, published_at, fetched_at, article_id) VALUES ('other','s','s','f','t','https://www.reuters.com/o','2026-10-03T06:00:00.000Z','x','someone-else')`);
   }
 
-  it('returns the chart in the requested language', async () => {
+  it('returns the charts in the requested language; a single chart stored before lists existed reads as a list of one', async () => {
     const env = makeEnv();
     seed(env);
     // a chart stored before chart types existed reads as a bar chart
-    expect((await get(env, '/api/articles/c1?lang=en')).body.chart).toEqual({ ...CHART, type: 'bar' });
-    expect((await get(env, '/api/articles/c1?lang=ka')).body.chart).toEqual({ ...KA_CHART, type: 'bar' });
+    expect((await get(env, '/api/articles/c1?lang=en')).body.charts).toEqual([{ ...CHART, type: 'bar' }]);
+    expect((await get(env, '/api/articles/c1?lang=ka')).body.charts).toEqual([{ ...KA_CHART, type: 'bar' }]);
   });
 
-  it('has no chart (null) when none was stored, and ignores a stored chart that no longer parses', async () => {
+  it('returns every stored chart of a story, in order, and skips one that is malformed', async () => {
+    const env = makeEnv();
+    pub(env, 'multi', '2026-10-03T10:00:00.000Z');
+    const donut = { type: 'donut', title: 'Reserves by currency', unit: '%', items: [{ label: 'USD', value: 58 }, { label: 'EUR', value: 20 }] };
+    const timeline = { type: 'timeline', title: 'Consultation', unit: '', items: [{ label: 'Opens', date: '2026-10-01' }, { label: 'Closes', date: '2026-12-31' }] };
+    exec(env, `INSERT INTO article_charts (article_id, lang, data, created_at) VALUES ('multi','en',?,'x')`, JSON.stringify([CHART, { type: 'nonsense' }, donut, timeline]));
+    const { body } = await get(env, '/api/articles/multi');
+    expect(body.charts.map((c: any) => c.type)).toEqual(['bar', 'donut', 'timeline']);
+  });
+
+  it('has no charts ([]) when none was stored, and ignores a stored chart that no longer parses', async () => {
     const env = makeEnv();
     pub(env, 'plain', '2026-10-03T10:00:00.000Z');
-    expect((await get(env, '/api/articles/plain')).body.chart).toBeNull();
+    expect((await get(env, '/api/articles/plain')).body.charts).toEqual([]);
     pub(env, 'broken', '2026-10-03T10:01:00.000Z');
     exec(env, `INSERT INTO article_charts (article_id, lang, data, created_at) VALUES ('broken','en','{not json','x')`);
     const r = await get(env, '/api/articles/broken');
     expect(r.status).toBe(200);
-    expect(r.body.chart).toBeNull();
+    expect(r.body.charts).toEqual([]);
   });
 
-  it('lists the cited items oldest first with publisher names, http(s) only, and only this story\'s items', async () => {
+  it('no longer sends the reporting timeline: the page shows graphs of the story itself', async () => {
     const env = makeEnv();
     seed(env);
     const { body } = await get(env, '/api/articles/c1');
-    expect(body.timeline).toEqual([
-      { name: 'Fed', url: 'https://www.federalreserve.gov/x', at: '2026-10-03T08:00:00.000Z' },
-      { name: 'The Block', url: 'https://www.theblock.co/post/2', at: '2026-10-03T09:30:00.000Z' },
-    ]);
+    expect(body).not.toHaveProperty('timeline');
+    expect(Object.keys(body).sort()).toEqual(['article', 'charts']);
   });
 });
 
@@ -483,35 +494,9 @@ describe('GET /api/articles?q= (text search)', () => {
   });
 });
 
-describe('GET /api/stats', () => {
-  it('counts stories per hour (24 buckets ending now), category, trust band and source tier', async () => {
-    const env = makeEnv();
-    const now = Date.now();
-    const at = (hoursAgo: number) => new Date(now - hoursAgo * 3600_000).toISOString();
-    const links = (...w: [string, number][]) => JSON.stringify(w.map(([url, trust_score]) => ({ title: 't', url, trust_score })));
-    pub(env, 'h1', at(0.2), { category: 'Economics', trust_score: 95, source_links: links(['https://www.federalreserve.gov/a', 5], ['https://www.reuters.com/a', 4.5]) });
-    pub(env, 'h2', at(0.3), { category: 'Economics', trust_score: 72, source_links: links(['https://www.reuters.com/b', 4.5]) });
-    pub(env, 'h3', at(5), { category: 'Crypto', trust_score: 61, source_links: links(['https://www.coindesk.com/c', 3.5]) });
-    pub(env, 'old', at(80), { category: 'Crypto', trust_score: 85, source_links: links(['https://www.coindesk.com/d', 3.5]) });
-    insertArticle(env, { id: 'rej', status: 'rejected', fact_checked: 1, published_at: at(1) });
-
-    const { status, body } = await get(env, '/api/stats');
-    expect(status).toBe(200);
-    expect(body.perHour).toHaveLength(24);
-    expect(body.perHour.reduce((s: number, h: any) => s + h.n, 0)).toBe(body.last24h);
-    expect(body.last24h).toBe(3); // 'old' is outside 24h, 'rej' is not published
-    expect(body.perHour.every((h: any, i: number, all: any[]) => i === 0 || h.at > all[i - 1].at)).toBe(true);
-    expect(body.total).toBe(4);
-    expect(body.byCategory).toEqual([{ category: 'Economics', n: 2 }, { category: 'Crypto', n: 2 }]);
-    expect(body.trustSpread).toEqual([{ band: '<70', n: 1 }, { band: '70-79', n: 1 }, { band: '80-89', n: 1 }, { band: '90+', n: 1 }]);
-    expect(Object.fromEntries(body.sourceTiers.map((t: any) => [t.tier, t.n]))).toEqual({ primary: 1, wire: 2, specialist: 2 });
-  });
-
-  it('works on an empty database', async () => {
-    const { status, body } = await get(makeEnv(), '/api/stats');
-    expect(status).toBe(200);
-    expect(body).toMatchObject({ total: 0, last24h: 0, byCategory: [], sourceTiers: [] });
-    expect(body.perHour).toHaveLength(24);
+describe('the site-wide numbers are gone', () => {
+  it('has no /api/stats: graphs live inside the stories', async () => {
+    expect((await get(makeEnv(), '/api/stats')).status).toBe(404);
   });
 });
 
@@ -538,7 +523,7 @@ describe('story pictures in the API', () => {
   });
 
   it('stock photo choice follows the topic, uses the Georgia set for Georgian stories, and is stable', () => {
-    for (const [category, set] of [['AI & Tech', 'tech'], ['Economics', 'economy'], ['Crypto', 'crypto'], ['Marketing', 'marketing'], ['Real Estate', 'property'], ['Global Trade', 'trade'], ['Geopolitics', 'world'], ['VC & Startups', 'startups'], ['General', 'general'], ['Something new', 'general']] as const) {
+    for (const [category, set] of [['AI & Tech', 'tech'], ['Economics', 'economy'], ['Crypto', 'crypto'], ['Real Estate', 'property'], ['Global Trade', 'trade'], ['Geopolitics', 'world'], ['VC & Startups', 'startups'], ['General', 'general'], ['Something new', 'general']] as const) {
       expect(STOCK_PHOTOS[set]).toContainEqual(stockPhotoFor('x1', category, false));
     }
     expect(STOCK_PHOTOS.georgia).toContainEqual(stockPhotoFor('x1', 'Crypto', true));

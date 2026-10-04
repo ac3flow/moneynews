@@ -264,7 +264,7 @@ describe('optional charts', () => {
       [COINDESK]: rss([{ title: 'Bitcoin ETFs record $1.2 billion inflows as price tops $120,000', link: 'https://www.coindesk.com/markets/2026/10/03/bitcoin-etf-inflows', pub: hoursAgo(3) }]),
       [THEBLOCK]: rss([{ title: 'Bitcoin ETF inflows reach $1.2 billion, price tops $120,000', link: 'https://www.theblock.co/post/1/bitcoin-etf-inflows', pub: hoursAgo(1) }]),
     });
-  const briefing = (c: any, chart: unknown) => ({
+  const briefing = (c: any, charts: unknown[]) => ({
     cluster_id: c.cluster_id,
     headline: `Briefing on: ${c.items[0].title}`.slice(0, 150),
     summary: `Summary of the reporting about ${c.items[0].title}.`.slice(0, 300),
@@ -276,17 +276,23 @@ describe('optional charts', () => {
     category: 'Crypto',
     georgia_related: false,
     used_item_ids: c.items.map((i: any) => i.id),
-    chart,
+    charts,
   });
   const GOOD = { title: 'Bitcoin ETFs', unit: '', items: [{ label: 'Inflows, $ billion', value: 1.2 }, { label: 'Price, $', value: 120000 }] };
+  const SECOND_BAR = { type: 'bar', title: 'Rate and inflows', unit: '', items: [{ label: 'Rate', value: 4.25 }, { label: 'Inflows', value: 1.2 }] };
+  const GAUGE = { type: 'gauge', title: 'Reported rate', unit: '%', items: [{ label: 'Rate', value: 4.25 }] };
   const INVENTED = { title: 'Invented', unit: '', items: [{ label: 'A', value: 7 }, { label: 'B', value: 9 }] };
-  const KA = (a: any) => ({ ...kaArticle(a), chart: a.chart && { title: 'ბიტკოინ ETF', unit: '', items: a.chart.items.map((i: any) => ({ label: 'ნიშნული', value: i.value })) } });
+  /** Georgian charts: same types, values and order, translated words. */
+  const KA = (a: any) => ({
+    ...kaArticle(a),
+    charts: (a.charts ?? []).map((c: any) => ({ ...c, title: 'ბიტკოინ ETF', items: c.items.map((i: any) => ({ ...i, label: 'ნიშნული' })) })),
+  });
 
-  it('stores a grounded chart, translates it, and drops an invented one without touching the article', async () => {
+  it('stores grounded charts, translates them, and drops an invented one without touching the article', async () => {
     const env = makeEnv();
     feeds();
     const llm = fakeLlm({
-      research: (input) => ({ briefings: input.clusters.map((c: any) => briefing(c, c.items[0].title.includes('Bitcoin') ? GOOD : INVENTED)) }),
+      research: (input) => ({ briefings: input.clusters.map((c: any) => briefing(c, [c.items[0].title.includes('Bitcoin') ? GOOD : INVENTED])) }),
       translate: (input) => ({ articles: input.articles.map(KA) }),
     });
     const r = await runPipeline(env, { trigger: 'manual', now: NOW, llm });
@@ -297,18 +303,46 @@ describe('optional charts', () => {
     const btc = articles.find((a) => a.source_links.includes('coindesk.com'))?.id;
     const charts = rows<{ article_id: string; lang: string; data: string }>(env, `SELECT * FROM article_charts ORDER BY lang`);
     expect(charts.map((c) => [c.article_id, c.lang])).toEqual([[btc, 'en'], [btc, 'ka']]);
-    expect(JSON.parse(charts[0]?.data ?? '{}').items.map((i: any) => i.value)).toEqual([1.2, 120000]);
-    expect(JSON.parse(charts[1]?.data ?? '{}').title).toBe('ბიტკოინ ETF');
+    expect(JSON.parse(charts[0]?.data ?? '[]')[0].items.map((i: any) => i.value)).toEqual([1.2, 120000]);
+    expect(JSON.parse(charts[1]?.data ?? '[]')[0].title).toBe('ბიტკოინ ETF');
     const skipped = rows<{ detail: string }>(env, `SELECT detail FROM pipeline_events WHERE stage = 'research' AND outcome = 'skipped'`);
     expect(skipped.some((e) => e.detail.includes('chart_not_grounded'))).toBe(true);
+  });
+
+  it('keeps several graphs of different types for one story, in both languages', async () => {
+    const env = makeEnv();
+    feeds();
+    const llm = fakeLlm({
+      // a second bar repeats a type, and the invented donut states figures the sources never gave: both are dropped
+      research: (input) => ({ briefings: input.clusters.map((c: any) => briefing(c, [GOOD, SECOND_BAR, GAUGE, { ...INVENTED, type: 'donut' }])) }),
+      translate: (input) => ({ articles: input.articles.map(KA) }),
+    });
+    await runPipeline(env, { trigger: 'manual', now: NOW, llm });
+    const stored = rows<{ lang: string; data: string }>(env, `SELECT lang, data FROM article_charts WHERE article_id = (SELECT id FROM articles WHERE source_links LIKE '%coindesk.com%') ORDER BY lang`);
+    expect(stored.map((r) => r.lang)).toEqual(['en', 'ka']);
+    for (const r of stored) expect(JSON.parse(r.data).map((c: any) => c.type)).toEqual(['bar', 'gauge']);
+    const btc = rows<{ id: string }>(env, `SELECT id FROM articles WHERE source_links LIKE '%coindesk.com%'`)[0]?.id;
+    const api = (await (await handleApi(new Request(`https://news.test/api/articles/${btc}?lang=ka`), env)).json()) as { charts: { type: string; title: string }[] };
+    expect(api.charts.map((c) => c.type)).toEqual(['bar', 'gauge']);
+    expect(api.charts[0]?.title).toBe('ბიტკოინ ETF');
+  });
+
+  it('the single "chart" field of an older prompt is still accepted', async () => {
+    const env = makeEnv();
+    feeds();
+    const llm = fakeLlm({
+      research: (input) => ({ briefings: input.clusters.map((c: any) => ({ ...briefing(c, []), chart: c.items[0].title.includes('Bitcoin') ? GOOD : null })) }),
+    });
+    await runPipeline(env, { trigger: 'manual', now: NOW, llm });
+    expect(rows<{ lang: string }>(env, `SELECT lang FROM article_charts`).map((c) => c.lang)).toEqual(['en']);
   });
 
   it('a Georgian chart that changes a value is dropped; the translation itself is still stored', async () => {
     const env = makeEnv();
     feeds();
     const llm = fakeLlm({
-      research: (input) => ({ briefings: input.clusters.map((c: any) => briefing(c, c.items[0].title.includes('Bitcoin') ? GOOD : null)) }),
-      translate: (input) => ({ articles: input.articles.map((a: any) => ({ ...KA(a), chart: a.chart && { title: 'ბიტკოინ ETF', unit: '', items: [{ label: 'ა', value: 1.3 }, { label: 'ბ', value: 120000 }] } })) }),
+      research: (input) => ({ briefings: input.clusters.map((c: any) => briefing(c, c.items[0].title.includes('Bitcoin') ? [GOOD] : [])) }),
+      translate: (input) => ({ articles: input.articles.map((a: any) => ({ ...KA(a), charts: a.charts.map(() => ({ title: 'ბიტკოინ ETF', unit: '', items: [{ label: 'ა', value: 1.3 }, { label: 'ბ', value: 120000 }] })) })) }),
     });
     await runPipeline(env, { trigger: 'manual', now: NOW, llm });
     expect(rows<{ n: number }>(env, `SELECT COUNT(*) n FROM article_translations WHERE lang = 'ka'`)[0]?.n).toBe(2);
@@ -318,7 +352,7 @@ describe('optional charts', () => {
   it('a malformed chart from the model is ignored instead of failing the briefing', async () => {
     const env = makeEnv();
     feeds();
-    const llm = fakeLlm({ research: (input) => ({ briefings: input.clusters.map((c: any) => briefing(c, { title: 'x', items: [{ label: 'only one', value: 1 }] })) }) });
+    const llm = fakeLlm({ research: (input) => ({ briefings: input.clusters.map((c: any) => briefing(c, [{ title: 'x', items: [{ label: 'only one', value: 1 }] }, 'nonsense'])) }) });
     const r = await runPipeline(env, { trigger: 'manual', now: NOW, llm });
     expect(r.status).toBe('ok');
     expect(rows(env, `SELECT 1 FROM articles WHERE status = 'published'`)).toHaveLength(2);

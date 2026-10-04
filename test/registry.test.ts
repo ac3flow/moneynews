@@ -3,10 +3,10 @@ import { FEEDS, SOURCES, SOURCE_CATEGORIES, W, findSourceByHost, findSourceByNam
 import { registrableDomain, resolveSource } from '../src/registry/trust';
 
 describe('source registry', () => {
-  it('has the 14 categories (the 13 from the brief plus geopolitics)', () => {
+  it('has the 13 categories (the 12 that remain from the brief plus geopolitics)', () => {
     expect(SOURCE_CATEGORIES.map((c) => c.id)).toEqual([
       'global_news', 'ai_tech', 'education', 'economics', 'georgia', 'investments', 'crypto',
-      'marketing', 'real_estate', 'trade', 'banks', 'startups', 'geopolitics', 'management',
+      'real_estate', 'trade', 'banks', 'startups', 'geopolitics', 'management',
     ]);
   });
 

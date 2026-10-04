@@ -24,7 +24,6 @@ const HUE = {
   ai: ['#032b22', '#12a47a'],
   econ: ['#04261f', '#0e8f68'],
   crypto: ['#06231f', '#1db8a0'],
-  mkt: ['#0a2a1b', '#3aa660'],
   re: ['#052920', '#1a9d82'],
   trade: ['#032a2b', '#0f9ba0'],
   startup: ['#0b2b18', '#4cbf6b'],
@@ -36,7 +35,6 @@ export const MOTIF_OF = {
   'AI & Tech': 'ai',
   Economics: 'econ',
   Crypto: 'crypto',
-  Marketing: 'mkt',
   'Real Estate': 're',
   'Global Trade': 'trade',
   Geopolitics: 'geo',
@@ -103,18 +101,6 @@ const MOTIF = {
         const f = r();
         o += `<path d="${p}Z" fill="#fff" fill-opacity="${f > 0.8 ? 0.34 : f > 0.6 ? 0.12 : 0}" stroke="#fff" stroke-opacity=".2"/>`;
       }
-    return o;
-  },
-  mkt(r) {
-    let o = '';
-    const cx = 250 + r() * 90;
-    const cy = 70 + r() * 70;
-    for (let i = 1; i < 7; i++) o += `<circle cx="${f0(cx)}" cy="${f0(cy)}" r="${i * 26}" fill="none" stroke="#fff" stroke-opacity="${(0.5 - i * 0.06).toFixed(2)}" stroke-width="${i === 2 ? 3 : 1.2}"/>`;
-    o += `<circle cx="${f0(cx)}" cy="${f0(cy)}" r="9" fill="#fff"/>`;
-    for (let i = 0; i < 9; i++) {
-      const a = -0.15 - i * 0.11;
-      o += `<path d="M30 230L${f0(30 + Math.cos(a) * 460)} ${f0(230 + Math.sin(a) * 460)}" stroke="#fff" stroke-opacity="${(0.07 + r() * 0.2).toFixed(2)}"/>`;
-    }
     return o;
   },
   re(r) {

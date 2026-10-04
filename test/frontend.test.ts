@@ -35,10 +35,9 @@ describe('every chart class has a style', () => {
   }
   for (const list of chartsJs.matchAll(/const (FILLS|STROKES) = \[([^\]]*)\]/g)) for (const w of (list[2] as string).matchAll(/'(\w+)'/g)) tokens.add(w[1] as string);
   for (const n of [1, 2, 3, 4, 5]) tokens.add(`tm${n}`);
-  for (const n of [0, 1, 2, 3, 4]) tokens.add(`hl${n}`);
 
   it('finds the classes it should', () => {
-    for (const w of ['f1', 's7', 'tm5', 'hl4', 'ln', 'ring', 'g-val', 'r-area', 'tgt', 'kpi-card']) expect(tokens.has(w), w).toBe(true);
+    for (const w of ['f1', 's7', 'tm5', 'ln', 'ring', 'g-val', 'r-area', 'tgt']) expect(tokens.has(w), w).toBe(true);
   });
 
   it('has a rule for each of them', () => {

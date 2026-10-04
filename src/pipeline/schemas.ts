@@ -81,6 +81,26 @@ export const ChartData = z
 export type ChartData = z.infer<typeof ChartData>;
 const optionalChart = ChartData.nullable().optional().catch(null);
 
+/** A story carries up to this many graphs, each of a different type, each describing a different part of the story. */
+export const MAX_CHARTS = 3;
+
+/** The graphs a model proposed. Each is checked on its own: one that is malformed is dropped without sinking the others. */
+const chartList = z
+  .array(z.unknown())
+  .catch([])
+  .transform((list) => list.flatMap((c) => { const r = ChartData.safeParse(c); return r.success ? [r.data] : []; }).slice(0, MAX_CHARTS));
+
+/** The graphs stored for a story: a JSON list, or (stories published before there could be several) a single graph. */
+export function parseCharts(stored: string | null | undefined): ChartData[] {
+  if (!stored) return [];
+  try {
+    const raw: unknown = JSON.parse(stored);
+    return chartList.parse(Array.isArray(raw) ? raw : [raw]);
+  } catch {
+    return []; // a chart that no longer parses is simply not shown
+  }
+}
+
 export const BriefingFields = fields(1);
 export type BriefingFields = z.infer<typeof BriefingFields>;
 
@@ -97,6 +117,8 @@ export const ResearchOutput = z.object({
         /** 0-100: how much the story matters to readers; a missing or invalid value counts as middling. */
         importance: z.number().min(0).max(100).transform(Math.round).catch(50),
         used_item_ids: z.array(z.string()).min(1),
+        /** Up to MAX_CHARTS graphs of different types. `chart` (one graph) is still accepted. */
+        charts: chartList,
         chart: optionalChart,
       }),
     )
@@ -131,7 +153,7 @@ export const FactCheckOutput = z.object({
 export type FactCheckOutput = z.infer<typeof FactCheckOutput>;
 
 export const TranslationOutput = z.object({
-  articles: z.array(GeorgianFields.extend({ id: z.string(), chart: optionalChart })).max(10),
+  articles: z.array(GeorgianFields.extend({ id: z.string(), charts: chartList, chart: optionalChart })).max(10),
 });
 export type TranslationOutput = z.infer<typeof TranslationOutput>;
 

@@ -29,7 +29,6 @@ export const ARTICLE_CATEGORIES = [
   'AI & Tech',
   'Economics',
   'Crypto',
-  'Marketing',
   'Real Estate',
   'Global Trade',
   'Geopolitics',

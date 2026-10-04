@@ -78,7 +78,7 @@ describe('which search feeds run', () => {
       expect(f.query?.length, f.id).toBeGreaterThan(5);
       expect(f.hint, f.id).toBeTruthy();
     }
-    for (const hint of ['trade', 'startups', 'marketing', 'real_estate', 'crypto', 'ai_tech', 'economics', 'geopolitics', 'georgia']) {
+    for (const hint of ['trade', 'startups', 'real_estate', 'crypto', 'ai_tech', 'economics', 'geopolitics', 'georgia']) {
       expect(search.some((f) => f.hint === hint && f.provider === 'bing'), `bing ${hint}`).toBe(true);
     }
     expect(search.filter((f) => f.georgia).every((f) => f.hint === 'georgia')).toBe(true);

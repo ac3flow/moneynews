@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groundChart, groundTranslatedChart } from '../src/pipeline/chart';
+import { groundChart, groundCharts, groundTranslatedChart, groundTranslatedCharts } from '../src/pipeline/chart';
 import { ChartData } from '../src/pipeline/schemas';
 
 const SOURCE = 'Broadcom is lining up a $60 billion financing package. Revenue could reach $115 billion in fiscal 2027 and $230 billion in 2028. Rate 4.25 percent, flows 1,200 million.';
@@ -182,5 +182,32 @@ describe('timeline charts (dated events for stories without comparable numbers)'
     const ka = (a: string, b: string) => ChartData.parse({ type: 'timeline', title: 'კონსულტაციის ვადები', items: [{ label: 'პასუხების ვადა', date: a }, { label: 'საბოლოო ანგარიში', date: b }] });
     expect(groundTranslatedChart(en, ka('2026-12-31', '2027-03-15'))).not.toBeNull();
     expect(groundTranslatedChart(en, ka('2026-12-30', '2027-03-15'))).toBeNull();
+  });
+});
+
+describe('groundCharts (several graphs per story)', () => {
+  const TEXT = 'Broadcom expects AI revenue of $115 billion in 2027 and $230 billion in 2028. Margins 41% and 59%.';
+  const bar = chart([{ label: 'Fiscal 2027', value: 115 }, { label: 'Fiscal 2028', value: 230 }]);
+  const donut = ChartData.parse({ type: 'donut', title: 'Margin mix', unit: '%', items: [{ label: 'Hardware', value: 41 }, { label: 'Software', value: 59 }] });
+  const gauge = ChartData.parse({ type: 'gauge', title: 'Software share', unit: '%', items: [{ label: 'Software', value: 59 }] });
+  const invented = ChartData.parse({ type: 'treemap', title: 'Invented split', unit: '', items: [{ label: 'A', value: 7 }, { label: 'B', value: 9 }, { label: 'C', value: 11 }] });
+
+  it('keeps the graphs whose numbers the text states, one per type, and counts the rest as dropped', () => {
+    const second = chart([{ label: 'Fiscal 2027', value: 115 }, { label: 'Fiscal 2028', value: 230 }], { title: 'Same type again' });
+    const { kept, dropped } = groundCharts([bar, second, donut, invented], TEXT);
+    expect(kept.map((c) => c.type)).toEqual(['bar', 'donut']);
+    expect(dropped).toBe(2);
+  });
+
+  it('keeps at most three graphs', () => {
+    const line = ChartData.parse({ type: 'line', title: 'Revenue', unit: '$ billion', items: [{ label: 'a', value: 115 }, { label: 'b', value: 230 }, { label: 'c', value: 115 }] });
+    expect(groundCharts([bar, donut, gauge, line], TEXT).kept.map((c) => c.type)).toEqual(['bar', 'donut', 'gauge']);
+  });
+
+  it('matches Georgian graphs to English ones by position and leaves out any that changed a value', () => {
+    const ka = (c: ChartData, value?: number) => ({ ...c, title: 'ქართული', items: c.items.map((i, k) => ({ ...i, label: i.label.replace(/[A-Za-z]+/g, 'ა'), value: k === 0 && value !== undefined ? value : i.value })) });
+    expect(groundTranslatedCharts([bar, donut], [ka(bar), ka(donut)]).map((c) => c.type)).toEqual(['bar', 'donut']);
+    expect(groundTranslatedCharts([bar, donut], [ka(bar, 116), ka(donut)]).map((c) => c.type)).toEqual(['donut']);
+    expect(groundTranslatedCharts([bar, donut], [ka(bar)]).map((c) => c.type)).toEqual(['bar']);
   });
 });

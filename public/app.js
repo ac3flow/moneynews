@@ -3,7 +3,7 @@
 //   #/s/<id>           one whole story   #/about                   how stories are made
 // All story text is written with textContent (never innerHTML): it is LLM-generated from web sources.
 
-import { bullets, columnChart, donut, eventTimeline, funnel, gauge, hbars, heatmap, kpiCard, kpiTiles, lineChart, radar, radialBars, stackedBars, timeline, treemap, waterfall } from './charts.js';
+import { bullets, donut, eventTimeline, funnel, gauge, hbars, kpiTiles, lineChart, radar, radialBars, treemap, waterfall } from './charts.js';
 import { coverMarkup } from './covers.js';
 import { h, icon } from './dom.js';
 import { DEFAULT_LANG, LANGS, makeT, plural } from './i18n.js';
@@ -13,9 +13,9 @@ const POLL_MS = 30_000;
 const DELAYED_AFTER_MS = 12 * 60_000;
 const PAGE = 20;
 
-const FALLBACK_TABS = ['top10', 'all', 'georgia', 'ai-tech', 'economics', 'crypto', 'marketing', 'real-estate', 'global-trade', 'geopolitics', 'vc-startups'].map((id) => ({ id }));
-const TAB_OF_CATEGORY = { 'AI & Tech': 'ai-tech', Economics: 'economics', Crypto: 'crypto', Marketing: 'marketing', 'Real Estate': 'real-estate', 'Global Trade': 'global-trade', Geopolitics: 'geopolitics', 'VC & Startups': 'vc-startups' };
-const CATEGORY_ORDER = ['AI & Tech', 'Economics', 'Crypto', 'Marketing', 'Real Estate', 'Global Trade', 'Geopolitics', 'VC & Startups', 'General'];
+const FALLBACK_TABS = ['top10', 'all', 'georgia', 'ai-tech', 'economics', 'crypto', 'real-estate', 'global-trade', 'geopolitics', 'vc-startups'].map((id) => ({ id }));
+const TAB_OF_CATEGORY = { 'AI & Tech': 'ai-tech', Economics: 'economics', Crypto: 'crypto', 'Real Estate': 'real-estate', 'Global Trade': 'global-trade', Geopolitics: 'geopolitics', 'VC & Startups': 'vc-startups' };
+const CATEGORY_ORDER = ['AI & Tech', 'Economics', 'Crypto', 'Real Estate', 'Global Trade', 'Geopolitics', 'VC & Startups', 'General'];
 
 const $ = (id) => document.getElementById(id);
 
@@ -186,8 +186,6 @@ function cover(a, cls = '', { kf = false, credit = false, eager = false, onFail 
   return el;
 }
 
-const trustBadge = (a) => h('span', { class: 'trust', title: t('trustLabel', { n: a.trust_score }) }, icon('shield', 13), t('trust', { n: a.trust_score }));
-
 function uniqueSources(a) {
   const seen = new Set();
   return (a.sources ?? []).filter((s) => safeHref(s.url) && !seen.has(s.name) && seen.add(s.name));
@@ -214,7 +212,7 @@ function rankItem(a, n) {
       { class: 'rank-body' },
       h('span', { class: 'kicker accent', text: catName(a.category) }),
       h('span', { class: 'rank-title' }, h('span', { class: 'link-reveal', text: tx(a.headline) })),
-      h('span', { class: 'rank-meta' }, h('span', { text: whenText(a.published_at), title: whenTitle(a.published_at) }), trustBadge(a)),
+      h('span', { class: 'rank-meta' }, h('span', { text: whenText(a.published_at), title: whenTitle(a.published_at) })),
     ),
   );
 }
@@ -242,7 +240,6 @@ function listItem(a, rank) {
             { class: 'meta-line' },
             h('time', { datetime: a.published_at, title: whenTitle(a.published_at), text: whenText(a.published_at) }),
             a.georgia_related ? h('span', { class: 'kicker accent', text: t('georgiaTag') }) : null,
-            trustBadge(a),
           ),
         ),
         sourceChips(a),
@@ -375,9 +372,7 @@ function filterText(q) {
   return date ? t('filterDay', { day: longDay(date) }) : null;
 }
 
-// ─── dashboard (home) ───────────────────────────────────────────────────────
-const signed = (n) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n)}`;
-const dirOf = (n) => (n > 0 ? 'up' : n < 0 ? 'down' : 'flat');
+// ─── chart helpers ──────────────────────────────────────────────────────────
 // Axis numbers: 120K, 3.4M, and two decimals when the whole range is small (3.12, 3.25), so close values stay distinguishable.
 const compact = (n, range = 100) => new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: range < 5 ? 2 : 1 }).format(n);
 /** A line that hovers far above zero would look flat from zero, so its scale starts just below its lowest point, on round numbers. */
@@ -395,94 +390,14 @@ function zoomScale(values) {
   const fix = (x) => Number(x.toFixed(6));
   return { yMin: fix(yMin), yMax: fix(yMin + n * step) };
 }
-const dayShort = (ymd) => `${+ymd.slice(8, 10)} ${MONTHS[S.lang][+ymd.slice(5, 7) - 1]}`;
-const weekdayShort = (ymd) => WEEKDAYS[S.lang][tbParts(Date.parse(`${ymd}T12:00:00+04:00`)).weekday].slice(0, 3);
-const sum = (xs) => xs.reduce((a, b) => a + b, 0);
-
-function dashCard(title, sub, body, cls = '') {
-  return h('div', { class: `panel dash-card ${cls}`.trim() }, h('h3', { text: title }), sub ? h('p', { class: 'sub', text: sub }) : null, body);
-}
-
-function dashboard(stats) {
-  if (!stats || !stats.total) return shell(h('section', { class: 'sec' }, h('div', { class: 'sec-head' }, h('h2', { text: t('dashTitle') })), h('p', { class: 'foot-note', text: t('dashNone') })));
-  const hours = stats.perHour.map((p) => ({ n: p.n, label: pad2(tb(p.at).hour), tip: `${pad2(tb(p.at).hour)}:00 · ${plural(t, 'stories', p.n)}` }));
-  const peak = hours.reduce((p, x) => (x.n > p.n ? x : p), hours[0]);
-  const daily = stats.daily;
-  const dn = daily.map((d) => d.n);
-  const dayLabels = daily.map((d) => dayShort(d.day));
-  const trustNow = daily.at(-1)?.avgTrust;
-  const trustPrev = daily.at(-2)?.avgTrust;
-  const trustDelta = trustNow != null && trustPrev != null ? trustNow - trustPrev : null;
-  const trustVals = daily.map((d) => d.avgTrust);
-  const known = trustVals.filter((v) => v != null);
-  const lo = known.length ? Math.max(0, Math.floor((Math.min(...known) - 5) / 10) * 10) : 0;
-
-  const kpis = [
-    kpiCard({ label: t('kpiTotal'), value: String(stats.total), note: t('weekTotal', { n: sum(dn) }), values: dn }),
-    kpiCard({ label: t('kpiLast24'), value: String(stats.last24h), note: peak.n > 0 ? t('peak', { n: peak.n, time: `${peak.label}:00` }) : null, values: hours.map((x) => x.n) }),
-    kpiCard({ label: t('kpiAvg'), value: stats.avgTrust == null ? '–' : String(stats.avgTrust), delta: trustDelta ? { text: t('vsYesterday', { n: signed(trustDelta) }), dir: dirOf(trustDelta) } : null, values: known }),
-    kpiCard({ label: t('kpiUpdated'), value: S.meta?.lastPublishedAt ? tb(S.meta.lastPublishedAt).time : '–', note: S.meta?.lastPublishedAt ? whenText(S.meta.lastPublishedAt) : null }),
-  ];
-
-  const topics = Object.entries(stats.topicDaily)
-    .map(([cat, v]) => ({ cat, v, total: sum(v) }))
-    .filter((x) => x.total > 0)
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 4);
-  const topicCards = topics.map((x) => {
-    const d = (x.v.at(-1) ?? 0) - (x.v.at(-2) ?? 0);
-    return kpiCard({ label: catName(x.cat), value: String(x.total), delta: { text: t('vsYesterday', { n: signed(d) }), dir: dirOf(d) }, values: x.v });
-  });
-
-  const bandNames = [...stats.topicBands.bands].reverse().map((b) => b.replace('-', '–')); // 90+ first: the darker the green, the higher the score
-  const cards = [
-    dashCard(t('dashPerHour'), t('dashPerHourNote'), [columnChart(hours, { aria: `${t('dashPerHour')}: ${plural(t, 'stories', stats.last24h)}` }), peak.n > 0 ? h('p', { class: 'foot-note', text: t('peak', { n: peak.n, time: `${peak.label}:00` }) }) : null]),
-    dashCard(t('dashDaily'), t('dashDailyNote'), lineChart({ labels: dayLabels, series: [{ values: dn, area: true, cls: 's1', tip: (i) => `${dayLabels[i]} · ${plural(t, 'stories', dn[i])}` }], fmt: (n) => String(Math.round(n)), integer: true, aria: t('dashDaily') })),
-    dashCard(t('dashTreemap'), t('dashTreemapNote'), treemap(stats.byCategory.map((c) => ({ label: catName(c.category), n: c.n, text: String(c.n) })), { aria: t('dashTreemap') })),
-    dashCard(t('dashBands'), t('dashBandsNote'), stackedBars(stats.topicBands.rows.slice(0, 8).map((r) => ({ label: catName(r.category), parts: [...r.counts].reverse() })), bandNames)),
-    dashCard(t('dashTiers'), t('dashTiersNote'), stats.sourceTiers.length ? donut(stats.sourceTiers.slice(0, 7).map((x) => ({ label: t(`tier.${x.tier}`), n: x.n, text: String(x.n) })), { center: { value: String(sum(stats.sourceTiers.map((x) => x.n))), label: t('secSources') }, aria: t('dashTiers') }) : null),
-    dashCard(t('dashFunnel'), t('dashFunnelNote'), funnel([['fnCollected', stats.funnel.collected], ['fnDrafted', stats.funnel.drafted], ['fnVerified', stats.funnel.verified], ['fnPublished', stats.funnel.published]].map(([k, v]) => ({ label: t(k), value: v, text: fmtNum(v) })), { aria: t('dashFunnel') })),
-    dashCard(t('dashTrustTrend'), t('dashDailyNote'), lineChart({ labels: dayLabels, series: [{ values: trustVals, cls: 's6', tip: (i) => `${dayLabels[i]} · ${t('kpiAvg')}: ${trustVals[i] ?? '–'}` }], yMin: lo, yMax: 100, fmt: (n) => String(Math.round(n)), aria: t('dashTrustTrend') })),
-    dashCard(t('dashShares'), t('dashSharesNote'), radialBars([{ label: t('shareGeorgia'), value: stats.shares.georgiaPct, max: 100, text: `${stats.shares.georgiaPct}%` }, { label: t('sharePrimary'), value: stats.shares.primaryPct, max: 100, text: `${stats.shares.primaryPct}%` }], { aria: t('dashShares') })),
-    dashCard(t('dashPublishers'), t('dashPublishersNote'), stats.publishers.length ? hbars(stats.publishers.slice(0, 8).map((p) => ({ label: p.name, value: p.n, text: String(p.n) }))) : null),
-    dashCard(t('dashWaterfall'), t('dashWaterfallNote'), waterfall(dn.map((n, i) => ({ label: dayLabels[i], value: i === 0 ? n : n - dn[i - 1], text: i === 0 ? String(n) : signed(n - dn[i - 1]) })))),
-    dashCard(
-      t('dashHeat'),
-      t('dashHeatNote'),
-      h(
-        'div',
-        { class: 'scroll-x' },
-        heatmap(stats.heatmap.cells, {
-          rowLabels: stats.heatmap.days.map(weekdayShort),
-          colLabels: Array.from({ length: 24 }, (_, i) => pad2(i)),
-          tip: (r, c, n) => `${longDay(stats.heatmap.days[r])} · ${pad2(c)}:00 · ${plural(t, 'stories', n)}`,
-          aria: t('dashHeat'),
-        }),
-      ),
-      'wide',
-    ),
-  ];
-
-  return shell(
-    h(
-      'section',
-      { class: 'sec', 'aria-labelledby': 'dash-h' },
-      h('div', { class: 'sec-head' }, h('h2', { id: 'dash-h', text: t('dashTitle') })),
-      h('div', { class: 'kpi-strip' }, kpis),
-      topicCards.length ? [h('h3', { class: 'dash-sub', text: t('dashTopicsWeek') }), h('div', { class: 'kpi-strip tight' }, topicCards)] : null,
-      h('div', { class: 'dash-grid' }, cards),
-    ),
-  );
-}
 
 // ─── views ──────────────────────────────────────────────────────────────────
 async function viewHome() {
-  const [latest, stats] = await Promise.all([api(A('tab=all&limit=50')), api('/api/stats').catch(() => null)]);
-  const list = latest.articles;
+  const list = (await api(A('tab=all&limit=50'))).articles;
   const parts = [liveBar()];
 
   if (!list.length) {
-    parts.push(emptyBox(t('emptyTitle'), t('emptyBody')), dashboard(null));
+    parts.push(emptyBox(t('emptyTitle'), t('emptyBody')));
     return parts;
   }
 
@@ -504,7 +419,7 @@ async function viewHome() {
     h(
       'div',
       { class: 'hero-body' },
-      h('div', { class: 'hero-tags' }, h('span', { class: 'pill', text: catName(top.category) }), h('span', { class: 'hero-flag', text: t('topStory') }), trustBadge(top)),
+      h('div', { class: 'hero-tags' }, h('span', { class: 'pill', text: catName(top.category) }), h('span', { class: 'hero-flag', text: t('topStory') })),
       h('h1', { class: 'balance', text: tx(top.headline) }),
       h('p', { class: 'dek', text: tx(top.summary) }),
       h('div', { class: 'meta-line' }, h('time', { datetime: top.published_at, title: whenTitle(top.published_at), text: whenText(top.published_at) }), h('span', { text: plural(t, 'sources', uniqueSources(top).length) })),
@@ -543,12 +458,12 @@ async function viewHome() {
     ),
   );
 
-  parts.push(shell(timeBar('all', new URLSearchParams())), dashboard(stats));
+  parts.push(shell(timeBar('all', new URLSearchParams())));
 
   // Latest stories (chronological) beside topic panels.
   const latestRows = list.filter((a) => !shown.has(a)).slice(0, 10);
-  const groups = CATEGORY_ORDER.map((c) => ({ c, items: list.filter((a) => a.category === c).sort((a, b) => b.trust_score - a.trust_score).slice(0, 4) })).filter((g) => g.items.length);
-  const georgia = list.filter((a) => a.georgia_related).sort((a, b) => b.trust_score - a.trust_score).slice(0, 4);
+  const groups = CATEGORY_ORDER.map((c) => ({ c, items: list.filter((a) => a.category === c).sort((a, b) => (b.importance ?? 0) - (a.importance ?? 0)).slice(0, 4) })).filter((g) => g.items.length);
+  const georgia = list.filter((a) => a.georgia_related).sort((a, b) => (b.importance ?? 0) - (a.importance ?? 0)).slice(0, 4);
   if (latestRows.length) {
     parts.push(
       shell(
@@ -607,10 +522,6 @@ async function viewTab(r) {
       first.articles.length ? [rows, more, holder] : h('div', { class: 'panel empty' }, h('h2', { text: filter ? t('emptySlotTitle') : t('emptyTitle') }), h('p', { text: filter ? t('emptySlotBody') : t('emptyBody') })),
     ),
   ];
-}
-
-function vizBlock(title, body, note) {
-  return body ? h('div', { class: 'viz-block' }, h('p', { class: 'viz-title' }, h('span', { text: title }), note ? h('small', { text: note }) : null), body) : null;
 }
 
 const dayNumber = (ymd) => Math.floor(Date.UTC(+ymd.slice(0, 4), +ymd.slice(5, 7) - 1, +ymd.slice(8, 10)) / 86_400_000);
@@ -685,25 +596,28 @@ function specChart(c) {
   }
 }
 
-function vizPanel(a, data, stats) {
+/** Graph types that need the full width of the story column: a time axis, many labelled bars, or tiles that shrink badly. */
+const WIDE_GRAPHS = new Set(['timeline', 'line', 'area', 'waterfall', 'treemap']);
+
+/**
+ * The story told in graphs, inside the story itself: its key numbers, then up to three source-checked graphs of different types
+ * (each one describes a part of this story), or, when the story has none, its comparable figures as bars. Null when nothing can be drawn.
+ * Narrow graphs sit two to a row; if one is left over it takes the whole row, so the grid never has a hole.
+ */
+function storyGraphs(a, data) {
   const tiles = (a.figures ?? []).filter((f) => f.label && /\d/.test(f.value) && f.value.length <= 18).slice(0, 4);
-  const chart = data.chart;
-  const events = (data.timeline ?? []).filter((e) => safeHref(e.url));
-  const compared = chart ? null : figureBars(a.figures ?? []);
-  const week = stats?.topicDaily?.[a.category];
-  const dayLabels = stats?.daily?.map((d) => dayShort(d.day)) ?? [];
+  const charts = data.charts ?? [];
+  const compared = charts.length ? null : figureBars(a.figures ?? []);
+  const items = [...charts.map((c) => ({ title: c.title, body: specChart(c), wide: WIDE_GRAPHS.has(c.type) })), ...(compared ? [{ title: t('vzFigures'), body: compared, wide: true }] : [])];
+  const narrow = items.filter((i) => !i.wide);
+  if (narrow.length % 2 === 1) narrow.at(-1).wide = true;
+  if (!tiles.length && !items.length) return null;
   return h(
     'section',
-    { class: 'panel panel-pad art-viz', 'aria-labelledby': 'viz-h' },
+    { class: 'story-graphs', 'aria-labelledby': 'viz-h' },
     h('h2', { id: 'viz-h', class: 'h-sm', text: t('vizTitle') }),
-    vizBlock(t('vizKey'), tiles.length ? kpiTiles(tiles.map((f) => ({ label: f.label, value: f.value }))) : null),
-    chart ? vizBlock(chart.title, specChart(chart), null) : null,
-    compared ? vizBlock(t('vzFigures'), compared, null) : null,
-    vizBlock(t('vzGauge'), gauge(a.trust_score, 100, { text: String(a.trust_score), aria: `${t('vzGauge')}: ${a.trust_score} / 100` })),
-    week && sum(week) > 0
-      ? vizBlock(t('vzTopic', { name: catName(a.category) }), lineChart({ labels: dayLabels, series: [{ values: week, area: true, cls: 's1', tip: (i) => `${dayLabels[i]} · ${plural(t, 'stories', week[i])}` }], fmt: (n) => String(Math.round(n)), integer: true, aria: t('vzTopic', { name: catName(a.category) }) }), t('vzTopicNote'))
-      : null,
-    events.length ? vizBlock(t('vizTimeline'), timeline(events.map((e) => ({ when: `${tb(e.at).short}, ${tb(e.at).time}`, who: e.name, url: e.url }))), t('vizTimelineNote')) : null,
+    tiles.length ? h('div', { class: 'graph-tiles' }, h('p', { class: 'viz-title', text: t('vizKey') }), kpiTiles(tiles.map((f) => ({ label: f.label, value: f.value })))) : null,
+    items.length ? h('div', { class: 'graph-grid' }, items.map((i) => h('figure', { class: `graph-card${i.wide ? ' wide' : ''}` }, h('figcaption', { text: i.title }), i.body))) : null,
   );
 }
 
@@ -718,7 +632,7 @@ async function viewStory(r) {
   }
   const a = data.article;
   const tab = TAB_OF_CATEGORY[a.category] ?? 'all';
-  const [relatedRes, stats] = await Promise.all([api(A(`tab=${tab}&limit=6`)).catch(() => ({ articles: [] })), api('/api/stats').catch(() => null)]);
+  const relatedRes = await api(A(`tab=${tab}&limit=6`)).catch(() => ({ articles: [] }));
   const related = relatedRes.articles.filter((x) => x.id !== a.id).slice(0, 3);
   const srcs = uniqueSources({ sources: a.sources });
   const paras = a.what_happened.split(/\n+/).map((s) => s.trim()).filter(Boolean);
@@ -733,7 +647,6 @@ async function viewStory(r) {
       {},
       h('div', {}, h('dt', { text: t('aboutCategory') }), h('dd', {}, h('a', { href: `#/t/${tab}`, text: catName(a.category) }))),
       h('div', {}, h('dt', { text: t('aboutPublished') }), h('dd', { class: 'tnum', title: whenTitle(a.published_at), text: `${tb(a.published_at).date}, ${tb(a.published_at).time}` })),
-      h('div', {}, h('dt', { text: t('aboutTrust') }), h('dd', {}, trustBadge(a))),
       a.fact_checked ? h('div', {}, h('dt', { text: t('aboutFacts') }), h('dd', {}, h('span', { class: 'vbadge' }, icon('check', 14), t('verified')))) : null,
     ),
   );
@@ -742,6 +655,7 @@ async function viewStory(r) {
     'div',
     { class: 'panel read-panel' },
     h('section', {}, h('h2', { class: 'h-md', text: t('secWhat') }), h('div', { class: 'prose sp-top' }, paras.map((p) => h('p', { text: tx(p) })))),
+    storyGraphs(a, data),
     h('section', { class: 'sumbox', 'aria-labelledby': 'why-h' }, h('h2', { id: 'why-h', text: t('secWhy') }), h('p', { text: tx(a.why_it_matters) })),
     a.figures.length
       ? h('section', { class: 'block' }, h('h2', { class: 'h-sm', text: t('secFigures') }), h('ul', { class: 'fig-list' }, a.figures.map((f) => (f.label ? h('li', {}, h('span', { text: f.label }), h('b', { text: f.value })) : h('li', { class: 'plain' }, h('b', { text: f.value }))))))
@@ -764,7 +678,7 @@ async function viewStory(r) {
                 h(
                   'a',
                   { class: 'src', href: s.url, target: '_blank', rel: 'noopener noreferrer nofollow' },
-                  h('span', {}, h('b', { text: s.name }), h('small', { text: s.title }), h('span', { class: 'src-meta' }, h('span', { text: t(`tier.${s.tier}`) }), h('span', { title: t('srcWeight', { n: s.trust_score }), text: `${s.trust_score} / 5` }))),
+                  h('span', {}, h('b', { text: s.name }), h('small', { text: s.title }), h('span', { class: 'src-meta' }, h('span', { text: t(`tier.${s.tier}`) }))),
                   h('span', { class: 'go' }, t('srcOpen'), icon('out', 15)),
                 ),
               ),
@@ -795,7 +709,6 @@ async function viewStory(r) {
           'div',
           { class: 'meta-line' },
           h('time', { class: 'ico', datetime: a.published_at, title: whenTitle(a.published_at) }, icon('clock', 14), `${tb(a.published_at).date}, ${tb(a.published_at).time}`),
-          trustBadge(a),
           a.georgia_related ? h('span', { text: t('georgiaTag') }) : null,
           h('span', { text: plural(t, 'sources', srcs.length) }),
         ),
@@ -803,13 +716,13 @@ async function viewStory(r) {
     ),
   );
 
-  return [h('div', { class: 'progress', 'aria-hidden': 'true' }, h('i', { id: 'prog' })), h('article', {}, hero, shell(h('div', { class: 'art-wrap' }, h('div', { class: 'art-grid' }, read, h('div', { class: 'art-side' }, about, vizPanel(a, data, stats))))))];
+  return [h('div', { class: 'progress', 'aria-hidden': 'true' }, h('i', { id: 'prog' })), h('article', {}, hero, shell(h('div', { class: 'art-wrap' }, h('div', { class: 'art-grid' }, read, h('div', { class: 'art-side' }, about)))))];
 }
 
 function viewAbout() {
   document.title = `${t('aboutPageTitle')} · ${t('docTitle')}`;
   const steps = ['Research', 'Editor', 'Fact', 'Translator'].map((k) => [t(`how${k}Label`), t(`how${k}`)]);
-  const weights = [['5.0', 'w5'], ['4.5', 'w45'], ['4.0', 'w4'], ['3.5', 'w35'], ['2.5', 'w25'], ['1.0', 'w1']];
+  const kinds = ['w5', 'w45', 'w4', 'w35', 'w25', 'w1'];
   return shell(
     h(
       'div',
@@ -817,8 +730,8 @@ function viewAbout() {
       h('h1', { text: t('aboutPageTitle') }),
       h('p', { text: t('aboutPageLead') }),
       h('ol', { class: 'steps' }, steps.map(([label, text]) => h('li', {}, h('b', { text: label }), ' ', text))),
-      h('h2', { class: 'h-md sp-top-lg', text: t('aboutWeights') }),
-      h('ul', { class: 'weights' }, weights.map(([w, k]) => h('li', {}, h('b', { text: w }), h('span', { text: t(k) })))),
+      h('h2', { class: 'h-md sp-top-lg', text: t('aboutKinds') }),
+      h('ul', { class: 'kinds' }, kinds.map((k) => h('li', { text: t(k) }))),
       h('h2', { class: 'h-md sp-top-lg', text: t('howGatesTitle') }),
       h('p', { text: t('howGates') }),
       h('h2', { class: 'h-md sp-top-lg', text: t('howSearchTitle') }),

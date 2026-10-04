@@ -2,7 +2,7 @@
 // database if every number in it can be traced back to the text it was drawn from.
 
 import { digitsPreserved } from './numbers';
-import type { ChartData } from './schemas';
+import { MAX_CHARTS, type ChartData } from './schemas';
 
 /** Numeric tokens of a text with thousands separators removed: "1,200" -> "1200", "4.25" -> "4.25". */
 const numberTokens = (s: string): string[] => (s.match(/\d+(?:[.,]\d+)*/g) ?? []).map((n) => n.replace(/,/g, ''));
@@ -76,6 +76,31 @@ export function groundChart(chart: ChartData | null | undefined, sourceText: str
       break;
   }
   return chart;
+}
+
+/**
+ * The graphs the Research agent proposed for one story. Each is grounded on its own; the ones that pass are kept, at most one
+ * per type (three bars would say less than a bar, a donut and a timeline), up to MAX_CHARTS.
+ */
+export function groundCharts(charts: ChartData[], sourceText: string, nowMs: number = Date.now()): { kept: ChartData[]; dropped: number } {
+  const kept: ChartData[] = [];
+  const types = new Set<string>();
+  for (const c of charts) {
+    if (kept.length >= MAX_CHARTS || types.has(c.type)) continue;
+    const ok = groundChart(c, sourceText, nowMs);
+    if (!ok) continue;
+    types.add(c.type);
+    kept.push(ok);
+  }
+  return { kept, dropped: charts.length - kept.length };
+}
+
+/** The Georgian versions of a story's graphs, matched to the English ones by position. A graph that does not match is left out. */
+export function groundTranslatedCharts(en: ChartData[], ka: ChartData[]): ChartData[] {
+  return en.flatMap((c, i) => {
+    const g = groundTranslatedChart(c, ka[i]);
+    return g ? [g] : [];
+  });
 }
 
 /**
