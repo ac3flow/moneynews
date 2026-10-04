@@ -398,7 +398,33 @@ async function status(env: Env): Promise<Response> {
     lastError: lastErrorOut,
   });
 }
+// ─── GET /api/ai-tech-directory ─────────────────────────────────────────────
+async function aiTechDirectory(sp: URLSearchParams): Promise<Response> {
+  const category = sp.get('category');
+  const tag = sp.get('tag');
+  const q = sp.get('q');
+  const featuredOnly = sp.get('featured') === 'true';
 
+  if (category && !AI_TECH_CATEGORIES.some((c) => c.id === category)) {
+    return fail(400, `unknown category "${category}"`);
+  }
+
+  let sources = AI_TECH_SOURCES;
+  if (category) sources = sourcesByCategory(category as AiTechCategoryId);
+  else if (tag) sources = sourcesByTag(tag);
+  else if (q) sources = searchSources(q);
+  if (featuredOnly) sources = featuredOnly && !category && !tag && !q ? featuredSources() : sources.filter((s) => s.featured);
+
+  return json(
+    {
+      categories: AI_TECH_CATEGORIES,
+      counts: countsByCategory(),
+      sources,
+    },
+    200,
+    'public, max-age=3600', // this directory changes rarely, unlike the news feed
+  );
+}
 // ─── POST /api/run[/stage] (admin) ──────────────────────────────────────────
 async function authorised(req: Request, env: Env): Promise<boolean> {
   if (!env.ADMIN_KEY) return false;
