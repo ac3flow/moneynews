@@ -1,4 +1,5 @@
-// Comprehensive source registry + trust hierarchy.
+
+  // Comprehensive source registry + trust hierarchy.
 //
 // Weights (0–5), from the product spec:
 //   5.0  Primary & official  central banks, statistical offices, regulators, ministries, academic journals
@@ -103,6 +104,10 @@ const { PRIMARY: P, WIRE, MAJOR: M, SPECIALIST: S, COMMENTARY: C, NEWSLETTER: N,
 // Feeds marked (v) answered with parseable items when probed on 2026-10-03; (a) are the
 // ones agent 2 already polls in production. A dead feed never breaks a run: it is
 // logged to pipeline_events and skipped.
+// NOTE (2026-10-04): Hacker News (419), Air Cargo News (403), Asian Development Bank (403),
+// WTO (403), CoinGape (403) and HBR (525) were confirmed consistently failing in production
+// logs, not just slow. Their feeds were removed below; each source entry is kept so a citation
+// of it is still scored correctly, it is simply no longer polled.
 const DEFS: Def[] = [
   // Wire services
   ['Reuters', WIRE, 'reuters.com', { aliases: ['Reuters RE', 'Reuters Banks', 'Reuters Crypto'] }],
@@ -194,7 +199,8 @@ const DEFS: Def[] = [
   ['IMF', P, 'imf.org', { aliases: ['IMF DOTS'] }],
   ['BIS', P, 'bis.org', { aliases: ['Basel Committee'], feeds: [rss('https://www.bis.org/doclist/all_pressrels.rss', 'economics')] }], // (v)
   ['UNCTAD', P, 'unctad.org'],
-  ['WTO', P, 'wto.org', { feeds: [rss('https://www.wto.org/library/rss/latest_news_e.xml', 'trade')] }], // (v)
+  // WTO's RSS consistently answers HTTP 403 to automated requests (confirmed 2026-10-04); weight-only now.
+  ['WTO', P, 'wto.org'],
   ['Eurostat', P, 'ec.europa.eu', { aliases: ['Eurostat Trade'] }],
   ['Fed', P, 'federalreserve.gov', { aliases: ['Federal Reserve'], feeds: [rss('https://www.federalreserve.gov/feeds/press_all.xml', 'economics'), rss('https://www.federalreserve.gov/feeds/speeches_and_testimony.xml', 'economics')] }], // (v)
   ['ECB', P, 'ecb.europa.eu', { feeds: [rss('https://www.ecb.europa.eu/rss/press.html', 'economics')] }], // (v)
@@ -202,6 +208,7 @@ const DEFS: Def[] = [
   ['BLS', P, 'bls.gov'],
   ['Census Bureau', P, 'census.gov', { aliases: ['US Census'] }],
   ['UK ONS', P, 'ons.gov.uk'],
+  // Asian Development Bank's RSS consistently answers HTTP 403 (confirmed 2026-10-04); weight-only now.
   ['Asian Development Bank', P, 'adb.org'],
   ['AfDB', P, 'afdb.org'],
   ['IDB', P, 'iadb.org'],
@@ -317,7 +324,9 @@ const DEFS: Def[] = [
   ['Sequoia', C, 'sequoiacap.com'],
   ['a16z', C, 'a16z.com'],
   ['First Round', C, 'firstround.com'],
-  ['HBR', S, 'hbr.org', { aliases: ['Harvard Business Review'], feeds: [rss('https://feeds.hbr.org/harvardbusiness', 'management')] }], // (a)
+  // HBR's RSS consistently answers HTTP 525 (Cloudflare-to-origin SSL failure on their end, confirmed
+  // 2026-10-04); not fixable from our side, so weight-only now.
+  ['HBR', S, 'hbr.org', { aliases: ['Harvard Business Review'] }],
 
   // Management & leadership
   ['Bain Insights', C, 'bain.com'],
@@ -358,7 +367,8 @@ const DEFS: Def[] = [
   // Crypto
   ['BeInCrypto', C, 'beincrypto.com', { feeds: [rss('https://beincrypto.com/feed', 'crypto')] }], // (v)
   ['Bitcoin Magazine', S, 'bitcoinmagazine.com', { feeds: [rss('https://bitcoinmagazine.com/feed', 'crypto')] }], // (v)
-  ['CoinGape', C, 'coingape.com', { feeds: [rss('https://coingape.com/feed/', 'crypto')] }], // (v)
+  // CoinGape's RSS consistently answers HTTP 403 (confirmed 2026-10-04); weight-only now.
+  ['CoinGape', C, 'coingape.com'],
   ['Crypto Briefing', C, 'cryptobriefing.com', { feeds: [rss('https://cryptobriefing.com/feed/', 'crypto')] }], // (v)
   ['CryptoPotato', C, 'cryptopotato.com', { feeds: [rss('https://cryptopotato.com/feed/', 'crypto')] }], // (v)
   ['CryptoSlate', S, 'cryptoslate.com', { feeds: [rss('https://cryptoslate.com/feed/', 'crypto')] }], // (v)
@@ -455,6 +465,18 @@ const DEFS: Def[] = [
   ['Presa', C, 'presa.ge', { georgia: true }],
   ['Business Media', S, 'businessmedia.ge', { georgia: true }],
 
+  // ── NEW: more Georgia sources (October 2026) — this topic was by far the thinnest ──────────────────
+  // All added as 'page' scrapes since none of these outlets publish RSS. Patterns are best-effort based
+  // on each site's typical URL shape; if one comes back with zero items after a day of polling, check
+  // /api/admin/events?stage=feed for its error and the pattern likely needs adjusting against the live site.
+  ['On.ge', S, 'on.ge', { georgia: true, feeds: [page('https://on.ge/category/business', '^/category/business/[^/?#]+/[^/?#]+$', 'georgia')] }],
+  ['Commersant Georgia', S, 'commersant.ge', { georgia: true, feeds: [page('https://commersant.ge/en/news', '^/en/news/[^/?#]+$', 'georgia')] }],
+  ['Forbes Georgia', S, 'forbes.ge', { georgia: true, feeds: [page('https://forbes.ge', '^/[a-z0-9-]{10,}/$', 'georgia')] }],
+  ['Georgia Businessdigest', S, 'businessdigest.ge', { georgia: true, feeds: [page('https://businessdigest.ge', '^/[a-z0-9-]{10,}/$', 'georgia')] }],
+  ['Palitra News', C, 'palitranews.ge', { georgia: true, feeds: [page('https://www.palitranews.ge/category/biznesi', '^/[a-z0-9-]{10,}-\\d+$', 'georgia')] }],
+  ['Radio Free Europe Georgia', S, 'radiotavisupleba.ge', { georgia: true, feeds: [page('https://www.radiotavisupleba.ge/z/1026', '^/a/\\d+\\.html$', 'georgia')] }],
+  ['Civil Georgia (news)', S, 'civil.ge', { georgia: true, feeds: [rss('https://civil.ge/archives/category/news/feed', 'georgia')] }],
+  ['Transparency International Georgia', P, 'transparency.ge', { georgia: true, feeds: [rss('https://transparency.ge/en/rss.xml', 'georgia')] }],
 
   // ── Wider coverage (October 2026): trade, VC, retail, real estate, crypto, geopolitics, AI ──────────────
   // Feeds probed on 2026-10-04: each answered with parseable items from the last ten days. Weights follow the tiers above.
@@ -468,7 +490,10 @@ const DEFS: Def[] = [
   ['Hellenic Shipping News', S, 'hellenicshippingnews.com', { feeds: [rss('https://www.hellenicshippingnews.com/feed/', 'trade')] }], // (v)
   ['Seatrade Maritime', S, 'seatrade-maritime.com', { feeds: [rss('https://www.seatrade-maritime.com/rss.xml', 'trade')] }], // (v)
   ['Logistics Manager', S, 'logisticsmanager.com', { feeds: [rss('https://www.logisticsmanager.com/feed/', 'trade')] }], // (v)
-  ['Air Cargo News', S, 'aircargonews.net', { feeds: [rss('https://www.aircargonews.net/feed', 'trade')] }], // (v)
+  // Air Cargo News's RSS consistently answers HTTP 403 (confirmed 2026-10-04); weight-only now.
+  ['Air Cargo News', S, 'aircargonews.net'],
+  ['TradeWinds', S, 'tradewindsnews.com', { feeds: [rss('https://www.tradewindsnews.com/rss', 'trade')] }],
+  ['American Shipper', S, 'americanshipper.com', { feeds: [rss('https://www.freightwaves.com/news/tag/american-shipper/feed', 'trade')] }],
   // VC, startups, innovation
   ['Tech.eu', S, 'tech.eu', { feeds: [rss('https://tech.eu/feed', 'startups')] }], // (v)
   ['AlleyWatch', S, 'alleywatch.com', { feeds: [rss('https://www.alleywatch.com/feed/', 'startups')] }], // (v)
@@ -482,6 +507,8 @@ const DEFS: Def[] = [
   ['Startups Magazine', S, 'startupsmagazine.co.uk', { feeds: [rss('https://startupsmagazine.co.uk/feed', 'startups')] }], // (v)
   ['The Next Web', S, 'thenextweb.com', { feeds: [rss('https://thenextweb.com/feed', 'startups')] }], // (v)
   ['Geekwire', S, 'geekwire.com', { feeds: [rss('https://www.geekwire.com/feed/', 'startups')] }], // (v)
+  ['SaaStr', N, 'saastr.com', { feeds: [rss('https://www.saastr.com/feed/', 'startups')] }],
+  ['NFX', N, 'nfx.com', { feeds: [rss('https://www.nfx.com/feed', 'startups')] }],
   // Retail
   ['Retail Dive', S, 'retaildive.com', { feeds: [rss('https://www.retaildive.com/feeds/news/', 'economics')] }], // (v)
   ['Modern Retail', S, 'modernretail.co', { feeds: [rss('https://www.modernretail.co/feed/', 'economics')] }], // (v)
@@ -491,6 +518,8 @@ const DEFS: Def[] = [
   ['Rismedia', S, 'rismedia.com', { feeds: [rss('https://www.rismedia.com/feed/', 'real_estate')] }], // (v)
   ['Real Estate Investing Today', N, 'realestateinvestingtoday.com', { feeds: [rss('https://www.realestateinvestingtoday.com/feed/', 'real_estate')] }], // (v)
   ['Mortgage Professional', S, 'mpamag.com', { feeds: [rss('https://www.mpamag.com/us/rss', 'real_estate')] }], // (v)
+  ['World Property Journal', S, 'worldpropertyjournal.com', { feeds: [rss('https://www.worldpropertyjournal.com/news-assets/rss-feed.php', 'real_estate')] }],
+  ['PE Hub Real Estate', S, 'pehub.com', { feeds: [rss('https://www.pehub.com/feed/', 'real_estate')] }],
   // Crypto
   ['NewsBTC', C, 'newsbtc.com', { feeds: [rss('https://www.newsbtc.com/feed/', 'crypto')] }], // (v)
   ['AMBCrypto', C, 'ambcrypto.com', { feeds: [rss('https://ambcrypto.com/feed/', 'crypto')] }], // (v)
@@ -500,6 +529,8 @@ const DEFS: Def[] = [
   ['CoinCentral', C, 'coincentral.com', { feeds: [rss('https://coincentral.com/feed/', 'crypto')] }], // (v)
   ['Cryptonomist', C, 'cryptonomist.ch', { feeds: [rss('https://en.cryptonomist.ch/feed/', 'crypto')] }], // (v)
   ['99Bitcoins', N, '99bitcoins.com', { feeds: [rss('https://99bitcoins.com/feed/', 'crypto')] }], // (v)
+  ['Coindoo', C, 'coindoo.com', { feeds: [rss('https://coindoo.com/feed/', 'crypto')] }],
+  ['CoinJournal', C, 'coinjournal.net', { feeds: [rss('https://coinjournal.net/feed/', 'crypto')] }],
   // Geopolitics and world affairs
   ['CBS News World', S, 'cbsnews.com', { feeds: [rss('https://www.cbsnews.com/latest/rss/world', 'geopolitics')] }], // (v)
   ['ABC News International', S, 'abcnews.go.com', { feeds: [rss('https://abcnews.go.com/abcnews/internationalheadlines', 'geopolitics')] }], // (v)
@@ -521,6 +552,8 @@ const DEFS: Def[] = [
   ['Mercopress', S, 'mercopress.com', { feeds: [rss('https://en.mercopress.com/rss', 'geopolitics')] }], // (v)
   ['UK Foreign Office', P, 'gov.uk', { feeds: [rss('https://www.gov.uk/government/organisations/foreign-commonwealth-development-office.atom', 'geopolitics')] }], // (v)
   ['The Diplomat', S, 'thediplomat.com', { feeds: [rss('https://thediplomat.com/feed/', 'geopolitics')] }], // (v)
+  ['Eurasianet', S, 'eurasianet.org', { feeds: [rss('https://eurasianet.org/rss', 'geopolitics')] }],
+  ['Chatham House', C, 'chathamhouse.org', { feeds: [rss('https://www.chathamhouse.org/rss/all', 'geopolitics')] }],
   // AI and technology
   ['The Register', S, 'theregister.com', { feeds: [rss('https://www.theregister.com/headlines.atom', 'ai_tech')] }], // (v)
   ['TechRadar', S, 'techradar.com', { feeds: [rss('https://www.techradar.com/rss', 'ai_tech')] }], // (v)
@@ -534,11 +567,14 @@ const DEFS: Def[] = [
   ['Android Authority', S, 'androidauthority.com', { feeds: [rss('https://www.androidauthority.com/feed/', 'ai_tech')] }], // (v)
   ['Slashdot', N, 'slashdot.org', { feeds: [rss('https://rss.slashdot.org/Slashdot/slashdotMain', 'ai_tech')] }], // (v)
   ['Rest of World', S, 'restofworld.org', { feeds: [rss('https://restofworld.org/feed/latest', 'ai_tech')] }], // (v)
+  ['Hugging Face Blog', S, 'huggingface.co', { feeds: [rss('https://huggingface.co/blog/feed.xml', 'ai_tech')] }],
+  ['AI Business', S, 'aibusiness.com', { feeds: [rss('https://aibusiness.com/rss.xml', 'ai_tech')] }],
   // Economics, central banks, institutions
   ['Reserve Bank of India', P, 'rbi.org.in', { feeds: [rss('https://www.rbi.org.in/pressreleases_rss.xml', 'economics')] }], // (v)
   ['Bank of Japan', P, 'boj.or.jp', { feeds: [rss('https://www.boj.or.jp/en/rss/whatsnew.xml', 'economics')] }], // (v)
   ['Swiss National Bank', P, 'snb.ch', { feeds: [rss('https://www.snb.ch/public/en/rss/pressrel', 'economics')] }], // (v)
   ['VoxEU', C, 'cepr.org', { feeds: [rss('https://cepr.org/rss/vox-content', 'economics')] }], // (v)
+  ['Central Bank of Azerbaijan', P, 'cbar.az', { feeds: [rss('https://www.cbar.az/rss/news', 'economics')] }],
   // Markets
   ['CFTC Press', P, 'cftc.gov', { feeds: [rss('https://www.cftc.gov/RSS/RSSGP/rssgp.xml', 'investments')] }], // (v)
 
@@ -554,6 +590,7 @@ const DEFS: Def[] = [
     gdelt('("artificial intelligence" OR semiconductor OR OpenAI OR Nvidia OR "data center")', 'ai_tech'),
     gdelt('(sanctions OR ceasefire OR summit OR diplomacy OR "security council")', 'geopolitics'),
     gdelt('(Tbilisi OR "Georgian government" OR "National Bank of Georgia" OR Batumi)', 'georgia', true),
+    gdelt('(Georgia OR Tbilisi) (lari OR GEL OR export OR investment OR tourism)', 'georgia', true),
   ] }],
   ['Bing News search', X, '', { feeds: [
     bing('global trade tariffs', 'trade'), bing('supply chain disruption shipping', 'trade'), bing('container freight rates ports', 'trade'), bing('export import trade deal', 'trade'),
@@ -564,17 +601,19 @@ const DEFS: Def[] = [
     bing('inflation interest rates central bank', 'economics'), bing('GDP growth economy forecast', 'economics'), bing('stock market earnings', 'investments'),
     bing('sanctions diplomacy talks', 'geopolitics'), bing('geopolitics security alliance', 'geopolitics'), bing('elections government crisis', 'geopolitics'),
     bing('Georgia Tbilisi economy business', 'georgia', true), bing('National Bank of Georgia lari', 'georgia', true), bing('Georgia country trade exports', 'georgia', true), bing('Georgian government European Union', 'georgia', true),
+    bing('Georgia parliament lari exchange rate', 'georgia', true), bing('Tbilisi real estate investment', 'georgia', true),
   ] }],
 
   // Social signals: discovery only, never sufficient on their own.
-  ['Hacker News', SOCIAL, 'news.ycombinator.com', { social: true, feeds: [rss('https://news.ycombinator.com/rss')] }], // (v)
+  // Hacker News's RSS consistently answers HTTP 419 (confirmed 2026-10-04); weight-only now.
+  ['Hacker News', SOCIAL, 'news.ycombinator.com', { social: true }],
   ['Reddit', SOCIAL, 'reddit.com redd.it', { social: true }],
   ['X', X, 'x.com twitter.com', { social: true, aliases: ['Twitter'] }],
 ];
 
 // Feeds added to sources that were already listed (a second section feed, a blog next to the news site).
 const EXTRA_FEEDS = new Map<string, FeedDef[]>([
-  ['Asian Development Bank', [rss('https://www.adb.org/rss/news', 'economics')]],
+  // Asian Development Bank's RSS is dead (HTTP 403, confirmed 2026-10-04) — removed from this map.
   ['Bitcoin Magazine', [rss('https://bitcoinmagazine.com/.rss/full/', 'crypto')]],
   ['Chainalysis', [rss('https://www.chainalysis.com/blog/feed/', 'crypto')]],
   ['Cointelegraph', [rss('https://cointelegraph.com/rss/tag/markets', 'crypto')]],
@@ -618,7 +657,7 @@ export const SOURCE_CATEGORIES: SourceCategory[] = [
   { id: 'ai_tech', label: 'AI & Technology', articleCategory: 'AI & Tech', sources: ['MIT Tech Review', 'TechCrunch', 'The Verge', 'Ars Technica', 'Wired', 'VentureBeat', 'IEEE Spectrum', 'ZDNET', 'Techmeme', 'SiliconANGLE', 'Engadget', 'The Information', 'Nature Technology', 'ScienceDaily', 'Google AI Blog', 'Microsoft Research Blog', 'OpenAI News', 'Anthropic News', 'NVIDIA Newsroom'] },
   { id: 'education', label: 'Education & Research', articleCategory: 'General', sources: ['Times Higher Education', 'Inside Higher Ed', 'EdSurge', 'Education Week', 'Chronicle of Higher Ed', 'UNESCO', 'OECD Education', 'World Bank Education', 'UNICEF Education', 'US Dept of Ed', 'EU Commission Education', 'Nature', 'Science', 'arXiv', 'SSRN', 'Google Scholar', 'Brookings', 'HBS Working Knowledge', 'Stanford GSB Insights', 'MIT Sloan'] },
   { id: 'economics', label: 'Economics & Macroeconomics', articleCategory: 'Economics', sources: ['IMF', 'World Bank', 'OECD', 'BIS', 'UNCTAD', 'WTO', 'Eurostat', 'Fed', 'ECB', 'BEA', 'BLS', 'Census Bureau', 'UK ONS', 'Asian Development Bank', 'AfDB', 'IDB', 'PIIE', 'NBER'] },
-  { id: 'georgia', label: 'Georgia Focus', articleCategory: 'Economics', sources: ['National Bank of Georgia', 'GeoStat', 'Ministry of Finance of Georgia', 'Revenue Service', 'Georgian Stock Exchange'] },
+  { id: 'georgia', label: 'Georgia Focus', articleCategory: 'Economics', sources: ['National Bank of Georgia', 'GeoStat', 'Ministry of Finance of Georgia', 'Revenue Service', 'Georgian Stock Exchange', 'On.ge', 'Commersant Georgia', 'Forbes Georgia', 'Georgia Businessdigest', 'Palitra News', 'Radio Free Europe Georgia', 'Civil Georgia (news)', 'Transparency International Georgia'] },
   { id: 'investments', label: 'Investments & Markets', articleCategory: 'Economics', sources: ['SEC EDGAR', 'Fed', 'ECB', 'BoE', 'US Treasury', 'FINRA', 'Morningstar', 'S&P Global', "Moody's", 'Fitch Ratings', 'CME Group', 'Nasdaq', 'NYSE', 'LSE', 'Trading Economics', 'FRED', 'Investing.com', 'Stock Exchange of Georgia', 'Refinitiv'] },
   { id: 'crypto', label: 'Crypto & Digital Assets', articleCategory: 'Crypto', sources: ['CoinDesk', 'Cointelegraph', 'The Block', 'Decrypt', 'Blockworks', 'DL News', 'Bloomberg Crypto', 'Reuters Crypto', 'Messari', 'Chainalysis', 'Glassnode', 'CoinGecko', 'CoinMarketCap', 'DefiLlama', 'Dune', 'Kaiko', 'CryptoQuant', 'FATF', 'SEC', 'ESMA'] },
   { id: 'real_estate', label: 'Real Estate & Property', articleCategory: 'Real Estate', sources: ['Reuters RE', 'Bloomberg RE', 'FT Property', 'The Real Deal', 'Bisnow', 'GlobeSt', 'Property Week', 'CoStar', 'Zillow Research', 'Redfin Research', 'CBRE', 'JLL', 'Knight Frank', 'Savills', 'Cushman & Wakefield', 'ULI', 'OECD Housing', 'World Bank Urban', 'GeoStat', 'NBG'] },
