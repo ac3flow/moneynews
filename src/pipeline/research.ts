@@ -72,24 +72,52 @@ export const canReachThreshold = (ev: ClusterEval, threshold: number): boolean =
  * everything else off the site. `counts` is the number of stories per article category in the last 24 hours.
  */
 export function pickClusters<T extends { items: FeedItemRow[]; ev: ClusterEval }>(candidates: T[], counts: Map<string, number>, n: number): T[] {
-  const left = [...candidates];
   const have = new Map(counts);
+  // Group eligible candidates by topic, best priority first within each topic.
+  const byTopic = new Map<string, T[]>();
+  const noTopic: T[] = [];
+  for (const c of candidates) {
+    const h = hintOf(c.items);
+    if (h) {
+      const arr = byTopic.get(h) ?? [];
+      arr.push(c);
+      byTopic.set(h, arr);
+    } else {
+      noTopic.push(c);
+    }
+  }
+  for (const arr of byTopic.values()) arr.sort((a, b) => b.ev.priority - a.ev.priority);
+  noTopic.sort((a, b) => b.ev.priority - a.ev.priority);
+
+  const topics = [...byTopic.keys()];
   const picked: T[] = [];
-  while (picked.length < n && left.length) {
-    let at = 0;
-    let top = Number.NEGATIVE_INFINITY;
-    left.forEach((c, i) => {
-      const h = hintOf(c.items);
-      const score = c.ev.priority + (h ? 4 / (1 + (have.get(h) ?? 0)) : 0);
-      if (score > top) {
-        top = score;
-        at = i;
+
+  // Always take the next pick from whichever topic currently has the fewest stories (today's picks
+  // count too), so a heavily-sourced topic can never crowd out a thin one.
+  while (picked.length < n) {
+    let bestTopic: string | null = null;
+    let bestCount = Infinity;
+    for (const t of topics) {
+      const arr = byTopic.get(t) ?? [];
+      if (!arr.length) continue;
+      const c = have.get(t) ?? 0;
+      if (c < bestCount) {
+        bestCount = c;
+        bestTopic = t;
       }
-    });
-    const [choice] = left.splice(at, 1) as [T];
-    picked.push(choice);
-    const h = hintOf(choice.items);
-    if (h) have.set(h, (have.get(h) ?? 0) + 1);
+    }
+    if (bestTopic) {
+      const arr = byTopic.get(bestTopic) as T[];
+      const choice = arr.shift() as T;
+      picked.push(choice);
+      have.set(bestTopic, (have.get(bestTopic) ?? 0) + 1);
+      continue;
+    }
+    if (noTopic.length) {
+      picked.push(noTopic.shift() as T);
+      continue;
+    }
+    break; // nothing eligible left anywhere
   }
   return picked;
 }
