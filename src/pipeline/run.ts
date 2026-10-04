@@ -15,7 +15,7 @@
 import type { Env } from '../types';
 import { nowIso } from '../time';
 import { ensureSchema } from '../db-init';
-import { flushEvents, logEvent, readConfig, type StageCtx } from './context';
+import { flushEvents, logEvent, mark, readConfig, type StageCtx } from './context';
 import { editStage } from './editor';
 import { factCheckStage } from './factcheck';
 import { kaGrammarStage } from './kagrammar';
@@ -55,7 +55,9 @@ export function stagesForCron(mode: string | undefined, cron: string): StageName
   return STAGED_CRONS[cron] ?? PIPELINE_ORDER;
 }
 
-const LOCK_WINDOW_MS = 10 * 60_000; // a 'running' row older than this is considered dead
+// A run of one scope starts every 5 minutes, so a 'running' row older than this is dead: the invocation was stopped
+// (CPU limit, restart) before it could finish. Keeping the window under the interval lets the next trigger take over.
+const LOCK_WINDOW_MS = 4 * 60_000;
 const STALE_AFTER_MS = 24 * 3600_000; // unpublished drafts older than this are dropped as stale
 const LOG_RETENTION_MS = 30 * 86_400_000;
 
@@ -86,6 +88,15 @@ export async function runPipeline(env: Env, opts: RunOptions): Promise<RunResult
 
   await ensureSchema(env);
 
+  // Rows left 'running' past the lock window belong to invocations that were stopped; say so instead of leaving them open.
+  await env.DB.prepare(
+    `UPDATE pipeline_runs SET status = 'error', finished_at = ?2,
+       stats = json_object('error', 'run did not finish (stopped before its last step)', 'last_progress', json_extract(stats, '$.progress'))
+     WHERE status = 'running' AND started_at < ?1`,
+  )
+    .bind(nowIso(now - LOCK_WINDOW_MS), nowIso())
+    .run();
+
   // Lock: insert our row, then yield to any earlier live run with the same scope.
   await env.DB.prepare(`INSERT INTO pipeline_runs (run_id, scope, trigger, started_at, status) VALUES (?1, ?2, ?3, ?4, 'running')`).bind(runId, scope, opts.trigger, started).run();
   const earlier = await env.DB.prepare(
@@ -115,6 +126,7 @@ export async function runPipeline(env: Env, opts: RunOptions): Promise<RunResult
     if (stages.includes('research')) results.housekeeping = await housekeeping(env, now);
     for (const name of stages) {
       try {
+        await mark(ctx, `${name} started`);
         results[name] = await STAGES[name](ctx);
       } catch (e) {
         failed = true;

@@ -24,12 +24,12 @@ Two modes, chosen with `PIPELINE_MODE`:
 |---|---|---|
 | Triggers | 5 crons, one minute apart | 1 cron, `*/5 * * * *` |
 | Each 5-minute window | `:00` collect · `:01` research + edit · `:02` fact-check + translate · `:03` Georgian grammar + publish · `:04` collect | everything, in order |
-| Sources searched per window | about 46 of 301 (two collects of about 23); every feed or search query about every 32 minutes | all 301 every 5 minutes (`FEEDS_PER_RUN=310`) |
+| Sources searched per window | about 28 of 301 (two collects of about 14); every feed or search query about every 55 minutes | all 301 every 5 minutes (`FEEDS_PER_RUN=310`) |
 | Why | Free allows 50 outbound requests and about 10 ms of CPU **per invocation**, so work is split across invocations | Paid raises both limits a hundredfold |
 
 An article drafted at `:01` is published at `:03`. The five expressions in `wrangler.jsonc` must match `STAGED_CRONS` in `src/pipeline/run.ts` (a test checks that every stage is covered). Free accounts allow five cron triggers in total, so disable the crons on the old agent Workers first.
 
-**CPU on Free.** Parsing feeds is the expensive part. Measured on real feed bodies, parsing costs about 0.34 ms per feed, so a 25-feed collect is roughly 9 ms of parsing before anything else, which is at the edge of Free's limit. If Cloudflare logs `Worker exceeded CPU time limit` (error 1102), lower `FEEDS_PER_RUN` (for example `15`) or move to Workers Paid and `single` mode. The numbers were measured in Node, not on Cloudflare's Free plan, so treat them as a guide.
+**CPU on Free.** Cloudflare ends a Free-plan cron run that uses more than about 10 ms of CPU, and a run that is ended this way leaves no trace except a `running` row. Measured in Node on real feed bodies, parsing costs about 1.5 ms per feed once warm (far more on a cold start), and clustering 240 titles about 8 ms. So the pipeline is built to survive being cut short: a collect run reads at most 90 KB per feed and 8 items per feed, skips old items before parsing them, and stores its results every 6 feeds; each run writes a progress note (`GET /api/admin/runs` shows `progress` / `last_progress` for a run that was stopped); and a run left `running` for more than 4 minutes is closed as an error so the next one is not blocked. If runs keep ending early, lower `FEEDS_PER_RUN`, or move to Workers Paid (30 s of CPU per run) and `single` mode. The numbers were measured in Node, not on Cloudflare, so treat them as a guide.
 
 ## Georgian
 
@@ -64,7 +64,7 @@ Each story may carry one chart that the Research agent proposes and the code che
 | `GEMINI_MODEL_KA` | var | `gemini-3.8-flash` | Model for the Georgian steps: translate, grammar correction, proofreading. Falls back to `GEMINI_MODEL` if removed. |
 | `GEMINI_BASE_URL` | var | Google's endpoint | Route calls through a gateway (e.g. Cloudflare AI Gateway). |
 | `PIPELINE_MODE` | var | `staged` | `staged` (Free) or `single` (Paid). |
-| `FEEDS_PER_RUN` | var | `25` | Sources per collect. Feeds are split into `ceil(301 / FEEDS_PER_RUN)` groups visited in turn: `25` → 13 groups of about 23. Use `310` with `single` on Paid. |
+| `FEEDS_PER_RUN` | var | `14` | Sources per collect. Feeds are split into `ceil(301 / FEEDS_PER_RUN)` groups visited in turn: `14` → 22 groups of about 14. Use `310` with `single` on Paid. |
 | `WEB_SEARCH` | var | `bing,gdelt` | Open-web news search providers: `bing`, `gdelt`, both, or `off`. See Sources. |
 | `MAX_ARTICLES_PER_RUN` | var | `4` | New drafts per research run, and the batch size of every later stage. |
 | `PUBLISH_THRESHOLD` | var | `60` | Minimum trust score to publish. |

@@ -298,6 +298,11 @@ describe('other endpoints', () => {
     expect((await get(makeEnv({ GEMINI_API_KEY: 'k' }), '/api/meta')).body.writing).toBe(true);
     env.DB.raw.prepare(`INSERT INTO pipeline_runs (run_id, trigger, started_at, finished_at, status) VALUES ('r','cron','2026-10-03T13:15:00.000Z','2026-10-03T13:15:20.000Z','ok')`).run();
     expect((await get(env, '/api/meta')).body.lastRunAt).toBe('2026-10-03T13:15:20.000Z');
+    // a run that yielded to another, and one found stopped halfway, do not make the site look live
+    const add = env.DB.raw.prepare(`INSERT INTO pipeline_runs (run_id, trigger, started_at, finished_at, status, stats) VALUES (?, 'cron', ?, ?, ?, ?)`);
+    add.run('skip', '2026-10-03T13:20:00.000Z', '2026-10-03T13:20:01.000Z', 'ok', JSON.stringify({ skipped: 'another run of the same stages is in progress' }));
+    add.run('dead', '2026-10-03T13:25:00.000Z', '2026-10-03T13:30:00.000Z', 'error', JSON.stringify({ error: 'run did not finish' }));
+    expect((await get(env, '/api/meta')).body.lastRunAt).toBe('2026-10-03T13:15:20.000Z');
   });
 
   it('GET /api/status exposes health without secrets', async () => {

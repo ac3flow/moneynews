@@ -67,11 +67,26 @@ const GENERIC_DF = 60; // tokens in more titles than this say nothing about whic
  */
 export function clusterItems<T extends ClusterInput>(items: T[]): T[][] {
   const n = items.length;
-  const toks = items.map((i) => tokens(i.title));
-  const df = new Map<string, number>();
-  for (const ts of toks) for (const t of ts) df.set(t, (df.get(t) ?? 0) + 1);
-  const weight = (t: string): number => Math.log(1 + n / (df.get(t) ?? 1));
-  const total = toks.map((ts) => [...ts].reduce((s, t) => s + weight(t), 0));
+  // Tokens become small integers so the counting below runs on typed arrays: this stage has ~10 ms of CPU on Workers Free.
+  const intern = new Map<string, number>();
+  const toks: number[][] = items.map((i) => {
+    const ids: number[] = [];
+    for (const t of tokens(i.title)) {
+      let id = intern.get(t);
+      if (id === undefined) {
+        id = intern.size;
+        intern.set(t, id);
+      }
+      ids.push(id);
+    }
+    return ids;
+  });
+  const m = intern.size;
+  const df = new Int32Array(m);
+  for (const ts of toks) for (const t of ts) df[t]!++;
+  const weight = new Float64Array(m);
+  for (let t = 0; t < m; t++) weight[t] = Math.log(1 + n / (df[t] as number));
+  const total = toks.map((ts) => ts.reduce((sum, t) => sum + (weight[t] as number), 0));
 
   const parent = items.map((_, i) => i);
   const find = (i: number): number => {
@@ -82,37 +97,44 @@ export function clusterItems<T extends ClusterInput>(items: T[]): T[][] {
     return i;
   };
 
-  // Inverted index: only compare items that share a token (this runs inside a 10 ms CPU budget on Workers Free).
-  const index = new Map<string, number[]>();
+  // Inverted index: only compare items that share a token. `stamp` says which item last touched an accumulator slot.
+  const index: number[][] = Array.from({ length: m }, () => []);
+  const stamp = new Int32Array(n).fill(-1);
+  const shared = new Int32Array(n);
+  const sharedWeight = new Float64Array(n);
+  const sharedRare = new Int32Array(n);
   for (let j = 0; j < n; j++) {
-    const tj = toks[j] as Set<string>;
-    const shared = new Map<number, { n: number; w: number; rare: number }>();
+    const tj = toks[j] as number[];
+    const touched: number[] = [];
     for (const t of tj) {
-      if ((df.get(t) ?? 0) > GENERIC_DF) continue;
-      const seen = index.get(t);
-      if (!seen) continue;
-      const w = weight(t);
-      const rare = (df.get(t) ?? 0) <= RARE_DF ? 1 : 0;
+      const d = df[t] as number;
+      if (d > GENERIC_DF) continue;
+      const seen = index[t] as number[];
+      if (seen.length === 0) continue;
+      const w = weight[t] as number;
+      const rare = d <= RARE_DF ? 1 : 0;
       for (const i of seen) {
-        const s = shared.get(i);
-        if (s) {
-          s.n++;
-          s.w += w;
-          s.rare += rare;
-        } else shared.set(i, { n: 1, w, rare });
+        if (stamp[i] === j) {
+          shared[i]!++;
+          sharedWeight[i]! += w;
+          sharedRare[i]! += rare;
+        } else {
+          stamp[i] = j;
+          shared[i] = 1;
+          sharedWeight[i] = w;
+          sharedRare[i] = rare;
+          touched.push(i);
+        }
       }
     }
-    for (const [i, s] of shared) {
-      const old = s.n >= 3 && s.n / Math.min(tj.size, (toks[i] as Set<string>).size) >= 0.4;
-      const ratio = s.w / Math.min(total[j] as number, total[i] as number);
-      const weighted = s.n >= 3 ? ratio >= 0.4 : s.n === 2 && s.rare >= 1 && ratio >= 0.6;
+    for (const i of touched) {
+      const count = shared[i] as number;
+      const old = count >= 3 && count / Math.min(tj.length, (toks[i] as number[]).length) >= 0.4;
+      const ratio = (sharedWeight[i] as number) / Math.min(total[j] as number, total[i] as number);
+      const weighted = count >= 3 ? ratio >= 0.4 : count === 2 && (sharedRare[i] as number) >= 1 && ratio >= 0.6;
       if (old || weighted) parent[find(j)] = find(i);
     }
-    for (const t of tj) {
-      const list = index.get(t);
-      if (list) list.push(j);
-      else index.set(t, [j]);
-    }
+    for (const t of tj) (index[t] as number[]).push(j);
   }
 
   const groups = new Map<number, T[]>();

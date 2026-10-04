@@ -51,6 +51,18 @@ export interface StageCtx {
   events: PipelineEvent[];
 }
 
+/**
+ * Leave a note in this run's row about how far it got. A run that is stopped from outside (Workers Free ends an
+ * invocation that uses more than ~10 ms of CPU) never reaches its final update, so the note is what
+ * GET /api/admin/runs shows for it. Best effort: a failed note must never fail the run.
+ */
+export async function mark(ctx: StageCtx, progress: string): Promise<void> {
+  await ctx.env.DB.prepare(`UPDATE pipeline_runs SET stats = ?2 WHERE run_id = ?1 AND status = 'running'`)
+    .bind(ctx.runId, JSON.stringify({ progress }))
+    .run()
+    .catch(() => undefined);
+}
+
 export function logEvent(ctx: StageCtx, e: PipelineEvent): void {
   ctx.events.push(e);
 }

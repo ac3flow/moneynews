@@ -47,7 +47,14 @@ describe('parseFeed', () => {
 
   it('caps items per feed', () => {
     const xml = '<rss><channel>' + Array.from({ length: 50 }, (_, i) => `<item><title>T${i}</title><link>https://e.com/${i}</link></item>`).join('') + '</channel></rss>';
-    expect(parseFeed(xml, NOW)).toHaveLength(12);
+    expect(parseFeed(xml, NOW)).toHaveLength(8);
+  });
+
+  it('skips items older than the cutoff without parsing them, and keeps the newer ones', () => {
+    const item = (i: number, date: string) => `<item><title>T${i}</title><link>https://e.com/${i}</link><pubDate>${date}</pubDate></item>`;
+    const xml = '<rss><channel>' + item(1, 'Sat, 03 Oct 2026 10:00:00 GMT') + item(2, 'Mon, 01 Jan 2024 10:00:00 GMT') + '</channel></rss>';
+    const items = parseFeed(xml, NOW, Date.parse('2026-10-01T00:00:00Z'));
+    expect(items.map((i) => i.title)).toEqual(['T1']);
   });
 });
 
