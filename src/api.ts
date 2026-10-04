@@ -490,7 +490,8 @@ export async function handleApi(req: Request, env: Env): Promise<Response> {
   const path = url.pathname.replace(/\/+$/, '') || '/';
   try {
     await ensureSchema(env);
-    if (req.method === 'GET' || req.method === 'HEAD') {
+    if (req.method === 'GET' || req.method === 'HEAD') ;{
+      if (path === '/api/ai-tech-directory') return await aiTechDirectory(url.searchParams);
       if (path === '/api/articles') return await listArticles(env, url.searchParams);
       const one = /^\/api\/articles\/([^/]+)$/.exec(path);
       if (one) return await getArticle(env, decodeURIComponent(one[1] as string), url.searchParams.get('lang'));
