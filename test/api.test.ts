@@ -348,6 +348,21 @@ describe('other endpoints', () => {
     expect((await handleApi(new Request('https://news.test/api/admin/events'), makeEnv())).status).toBe(401); // disabled without a key
   });
 
+  it('GET /api/admin/runs lists recent runs with their stats, and shows one that never finished', async () => {
+    const env = makeEnv({ ADMIN_KEY: 's3cret' });
+    const run = env.DB.raw.prepare(`INSERT INTO pipeline_runs (run_id, scope, trigger, started_at, finished_at, status, stats) VALUES (?, ?, 'cron', ?, ?, ?, ?)`);
+    run.run('r1', 'collect', '2026-10-03T10:00:00.000Z', '2026-10-03T10:00:03.000Z', 'ok', JSON.stringify({ collect: { polled: 23, searches: 3 } }));
+    run.run('r2', 'research+edit', '2026-10-03T10:01:00.000Z', null, 'running', null);
+    const call = (path: string, headers: Record<string, string> = {}) => handleApi(new Request(`https://news.test${path}`, { headers }), env);
+    expect((await call('/api/admin/runs')).status).toBe(401);
+    const all = (await (await call('/api/admin/runs', { 'x-admin-key': 's3cret' })).json()) as any;
+    expect(all.runs.map((r: any) => r.run_id)).toEqual(['r2', 'r1']);
+    expect(all.runs[1]).toMatchObject({ scope: 'collect', status: 'ok', ms: 3000, stats: { collect: { polled: 23, searches: 3 } } });
+    expect(all.runs[0]).toMatchObject({ status: 'running', ms: null, stats: null });
+    const one = (await (await call('/api/admin/runs?scope=collect&status=ok', { 'x-admin-key': 's3cret' })).json()) as any;
+    expect(one.runs.map((r: any) => r.run_id)).toEqual(['r1']);
+  });
+
   it('POST /api/run requires the admin key (header or bearer), is disabled without one, and rejects GET', async () => {
     const call = (env: Env, init: RequestInit, path = '/api/run/research') => handleApi(new Request(`https://news.test${path}`, init), env);
     const off = makeEnv();

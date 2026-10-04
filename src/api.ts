@@ -588,6 +588,29 @@ async function adminEvents(env: Env, sp: URLSearchParams): Promise<Response> {
   return json({ events }, 200, 'no-store');
 }
 
+// ─── GET /api/admin/runs (admin) ────────────────────────────────────────────
+/** Recent pipeline runs, newest first: which stages ran, how long they took, and what each reported. A run still marked 'running' long after it started died mid-way. */
+async function adminRuns(env: Env, sp: URLSearchParams): Promise<Response> {
+  const limit = Math.min(100, Math.max(1, Number.parseInt(sp.get('limit') ?? '20', 10) || 20));
+  const { results } = await env.DB.prepare(
+    `SELECT run_id, scope, trigger, started_at, finished_at, status, stats FROM pipeline_runs
+     WHERE (?1 IS NULL OR scope = ?1) AND (?2 IS NULL OR status = ?2)
+     ORDER BY started_at DESC LIMIT ?3`,
+  )
+    .bind(sp.get('scope'), sp.get('status'), limit)
+    .all<{ run_id: string; scope: string; trigger: string; started_at: string; finished_at: string | null; status: string; stats: string | null }>();
+  const runs = results.map((r) => {
+    let stats: unknown = r.stats;
+    try {
+      stats = r.stats ? JSON.parse(r.stats) : null;
+    } catch {
+      stats = r.stats?.slice(0, 2000) ?? null;
+    }
+    return { ...r, ms: r.finished_at ? Date.parse(r.finished_at) - Date.parse(r.started_at) : null, stats };
+  });
+  return json({ runs }, 200, 'no-store');
+}
+
 // ─── router ─────────────────────────────────────────────────────────────────
 export async function handleApi(req: Request, env: Env): Promise<Response> {
   const url = new URL(req.url);
@@ -603,6 +626,7 @@ export async function handleApi(req: Request, env: Env): Promise<Response> {
       if (path === '/api/meta') return await meta(env);
       if (path === '/api/status') return await status(env);
       if (path === '/api/admin/events') return (await authorised(req, env)) ? await adminEvents(env, url.searchParams) : fail(401, 'unauthorized');
+      if (path === '/api/admin/runs') return (await authorised(req, env)) ? await adminRuns(env, url.searchParams) : fail(401, 'unauthorized');
     }
 
     const run = /^\/api\/run(?:\/([a-z_]+))?$/.exec(path);
