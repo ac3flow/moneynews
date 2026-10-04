@@ -1,6 +1,6 @@
 // Small SVG/DOM chart builders. They take ready-made strings (already translated, already formatted)
 // and never read story text as markup. Colours come from CSS classes (.f1-.f7 fills, .s1-.s7 strokes,
-// .tm1-.tm5 treemap tiles, .hl0-.hl4 heat levels), so light and dark themes need no code here.
+// .tm1-.tm5 treemap tiles), so light and dark themes need no code here.
 // Nothing sets an inline style: the CSP forbids it, and SVG attributes are all these charts need.
 
 import { h, svg } from './dom.js';
@@ -21,35 +21,6 @@ function niceMax(v) {
 }
 
 // ─── columns over time ──────────────────────────────────────────────────────
-
-/** Columns over time, e.g. stories per hour. items: [{ n, label, tip }]. */
-export function columnChart(items, { aria, labelEvery = 6 } = {}) {
-  const W = 320;
-  const H = 150;
-  const pl = 6;
-  const pr = 6;
-  const pt = 24;
-  const pb = 22;
-  const step = (W - pl - pr) / items.length;
-  const bw = Math.max(2, step - 3);
-  const max = Math.max(1, ...items.map((i) => i.n));
-  const base = H - pb;
-  const peak = items.reduce((p, i, idx) => (i.n > (items[p]?.n ?? 0) ? idx : p), 0);
-  const y = (n) => pt + (1 - n / max) * (base - pt);
-
-  const kids = [svg('path', { class: 'grid', d: `M${pl} ${pt}H${W - pr}M${pl} ${((pt + base) / 2).toFixed(0)}H${W - pr}M${pl} ${base}H${W - pr}` })];
-  items.forEach((it, i) => {
-    const x = pl + i * step + (step - bw) / 2;
-    const top = it.n > 0 ? y(it.n) : base - 2;
-    kids.push(svg('rect', { class: `col${it.n === 0 ? ' zero' : i === peak ? ' peak' : ''}`, x: x.toFixed(1), y: top.toFixed(1), width: bw.toFixed(1), height: (base - top).toFixed(1), rx: 2 }, svg('title', {}, it.tip)));
-    if (i % labelEvery === 0 || i === items.length - 1) kids.push(svg('text', { x: (x + bw / 2).toFixed(1), y: H - 6, 'text-anchor': 'middle' }, it.label));
-  });
-  if (items[peak] && items[peak].n > 0) {
-    const x = pl + peak * step + step / 2;
-    kids.push(svg('text', { class: 'val', x: x.toFixed(1), y: (y(items[peak].n) - 6).toFixed(1), 'text-anchor': 'middle' }, String(items[peak].n)));
-  }
-  return svg('svg', { class: 'chart', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': aria }, kids);
-}
 
 // ─── line and area ──────────────────────────────────────────────────────────
 
@@ -325,48 +296,6 @@ export function funnel(items, { aria } = {}) {
   return svg('svg', { class: 'chart funnel', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': aria }, kids);
 }
 
-/** Stacked horizontal bars. rows: [{ label, parts: number[], text }], legend: one name per part. */
-export function stackedBars(rows, legend) {
-  const max = Math.max(1e-9, ...rows.map((r) => r.parts.reduce((s, n) => s + n, 0)));
-  return h(
-    'div',
-    {},
-    h(
-      'div',
-      { class: 'bars' },
-      rows.map((r) => {
-        let x = 0;
-        const segs = r.parts.map((n, i) => {
-          const w = (n / max) * 100;
-          const el = n > 0 ? svg('rect', { class: FILLS[i % 4], x: r2(x), width: Math.max(0, w - 0.5).toFixed(2), height: 10 }, svg('title', {}, `${r.label} · ${legend[i]}: ${n}`)) : null;
-          x += w;
-          return el;
-        });
-        return h('div', { class: 'bar-row' }, h('span', { text: r.label, title: r.label }), h('b', { text: r.text ?? String(r.parts.reduce((s, n) => s + n, 0)) }), svg('svg', { class: 'bar tall', viewBox: '0 0 100 10', preserveAspectRatio: 'none', 'aria-hidden': 'true' }, svg('rect', { class: 'trk', width: 100, height: 10 }), segs));
-      }),
-    ),
-    h(
-      'ul',
-      { class: 'legend row' },
-      legend.map((name, i) => h('li', {}, svg('svg', { viewBox: '0 0 10 10', 'aria-hidden': 'true' }, svg('rect', { class: FILLS[i % 4], width: 10, height: 10 })), h('span', { text: name }))),
-    ),
-  );
-}
-
-/** One stacked bar with a legend. items: [{ label, n, text }]. */
-export function splitBar(items) {
-  const parts = items.slice(0, 5);
-  const total = parts.reduce((s, i) => s + i.n, 0) || 1;
-  let x = 0;
-  const segs = parts.map((it, n) => {
-    const w = (it.n / total) * 100;
-    const r = svg('rect', { class: FILLS[n], x: x.toFixed(2), width: Math.max(0, w - 0.6).toFixed(2), height: 14 });
-    x += w;
-    return r;
-  });
-  return h('div', {}, svg('svg', { class: 'splitbar', viewBox: '0 0 100 14', preserveAspectRatio: 'none', 'aria-hidden': 'true' }, segs), legendList(parts));
-}
-
 // ─── treemap ────────────────────────────────────────────────────────────────
 
 /** Squarified treemap layout: items [{ a }] sorted by area, in the rectangle (x, y, w, h). */
@@ -448,30 +377,6 @@ export function treemap(items, { aria } = {}) {
   return svg('svg', { class: 'chart treemap', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': aria }, kids);
 }
 
-// ─── heatmap ────────────────────────────────────────────────────────────────
-
-/** Heatmap: cells[row][col] counts. rowLabels, colLabels as strings; tip(row, col, n) for each cell. */
-export function heatmap(cells, { rowLabels, colLabels, colEvery = 2, tip, aria }) {
-  const pl = 46;
-  const pt = 4;
-  const cw = 22;
-  const chh = 22;
-  const gap = 3;
-  const cols = cells[0]?.length ?? 24;
-  const W = pl + cols * cw + 4;
-  const H = pt + cells.length * chh + 22;
-  const max = Math.max(1, ...cells.flat());
-  const level = (n) => (n <= 0 ? 0 : clamp(Math.ceil((n / max) * 4), 1, 4));
-  const kids = [];
-  cells.forEach((row, ri) => {
-    kids.push(svg('text', { x: pl - 6, y: r1(pt + ri * chh + chh / 2 + 3.4), 'text-anchor': 'end' }, rowLabels[ri]));
-    row.forEach((n, ci) => {
-      kids.push(svg('rect', { class: `hl${level(n)}`, x: r1(pl + ci * cw), y: r1(pt + ri * chh), width: r1(cw - gap), height: r1(chh - gap), rx: 4 }, svg('title', {}, tip ? tip(ri, ci, n) : String(n))));
-    });
-  });
-  for (let ci = 0; ci < cols; ci += colEvery) kids.push(svg('text', { x: r1(pl + ci * cw + (cw - gap) / 2), y: H - 5, 'text-anchor': 'middle' }, colLabels[ci]));
-  return svg('svg', { class: 'chart heat', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': aria }, kids);
-}
 
 // ─── radar ──────────────────────────────────────────────────────────────────
 
@@ -553,39 +458,7 @@ export function eventTimeline(items, { today, todayLabel, aria } = {}) {
   );
 }
 
-// ─── sparklines and KPI cards ───────────────────────────────────────────────
-
-/** A tiny trend line. values: numbers (oldest first). */
-export function sparkline(values, { cls = 's1', aria } = {}) {
-  const W = 96;
-  const H = 30;
-  const pad = 3;
-  const v = values.length > 1 ? values : [0, ...values, ...values];
-  const lo = Math.min(...v);
-  const hi = Math.max(...v);
-  const span = hi - lo || 1;
-  const x = (i) => pad + (i * (W - pad * 2)) / (v.length - 1);
-  const y = (n) => (hi === lo ? H / 2 : H - pad - ((n - lo) / span) * (H - pad * 2));
-  const d = v.map((n, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(n).toFixed(1)}`).join('');
-  return svg(
-    'svg',
-    { class: 'spark', viewBox: `0 0 ${W} ${H}`, role: aria ? 'img' : null, 'aria-label': aria, 'aria-hidden': aria ? null : 'true' },
-    svg('path', { class: `ar ${cls}`, d: `${d}L${x(v.length - 1).toFixed(1)} ${H - pad}L${x(0).toFixed(1)} ${H - pad}Z` }),
-    svg('path', { class: `ln ${cls}`, d }),
-    svg('circle', { class: `dot ${cls}`, cx: x(v.length - 1).toFixed(1), cy: y(v[v.length - 1]).toFixed(1), r: 2.6 }),
-  );
-}
-
-/** KPI card with a sparkline. { label, value, note?, delta?: { text, dir: 'up'|'down'|'flat' }, values?: number[] } */
-export function kpiCard({ label, value, note, delta, values, aria }) {
-  return h(
-    'div',
-    { class: 'panel kpi-card' },
-    h('p', { class: 'kpi-l', text: label }),
-    h('p', { class: 'kpi-v', text: value }),
-    h('div', { class: 'kpi-foot' }, delta ? h('span', { class: `delta ${delta.dir}`, text: delta.text }) : note ? h('span', { class: 'kpi-note', text: note }) : h('span', {}), values && values.length > 1 ? sparkline(values, { aria }) : null),
-  );
-}
+// ─── key numbers ─────────────────────────────────────────────────────────────
 
 /** Figure tiles. items: [{ label, value }]. */
 export function kpiTiles(items) {
@@ -596,11 +469,3 @@ export function kpiTiles(items) {
   );
 }
 
-/** Vertical timeline. items: [{ when, who, url }]. */
-export function timeline(items) {
-  return h(
-    'ol',
-    { class: 'tl' },
-    items.map((i) => h('li', {}, h('b', { text: i.when }), i.url ? h('a', { href: i.url, target: '_blank', rel: 'noopener noreferrer nofollow', text: i.who }) : h('span', { text: i.who }))),
-  );
-}

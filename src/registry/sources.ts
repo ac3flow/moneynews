@@ -19,7 +19,7 @@ import type { ArticleCategory } from '../types';
 
 export type SourceCategoryId =
   | 'global_news' | 'ai_tech' | 'education' | 'economics' | 'georgia' | 'investments' | 'crypto'
-  | 'marketing' | 'real_estate' | 'trade' | 'banks' | 'startups' | 'management' | 'geopolitics';
+  | 'real_estate' | 'trade' | 'banks' | 'startups' | 'management' | 'geopolitics';
 
 export type TierId = 'primary' | 'wire' | 'major' | 'specialist' | 'commentary' | 'unclassified' | 'social';
 
@@ -254,28 +254,9 @@ const DEFS: Def[] = [
   ['FATF', P, 'fatf-gafi.org'],
   ['ESMA', P, 'esma.europa.eu', { feeds: [rss('https://www.esma.europa.eu/rss.xml', 'investments')] }], // (v)
 
-  // Marketing & advertising
-  ['Marketing Week', S, 'marketingweek.com'],
-  ['Ad Age', S, 'adage.com'],
-  ['Adweek', S, 'adweek.com', { feeds: [rss('https://www.adweek.com/feed/', 'marketing')] }], // (v)(a)
-  ['Digiday', S, 'digiday.com', { feeds: [rss('https://digiday.com/feed/', 'marketing')] }], // (v)
-  ['Campaign', S, 'campaignlive.com campaignlive.co.uk', { feeds: [rss('https://www.campaignlive.com/rss/news', 'marketing')] }], // (v)
-  ['The Drum', S, 'thedrum.com'],
-  ['SEJ', C, 'searchenginejournal.com'],
-  ['SEL', S, 'searchengineland.com', { aliases: ['Search Engine Land'], feeds: [rss('https://searchengineland.com/feed', 'marketing')] }], // (a)
-  ['Social Media Examiner', C, 'socialmediaexaminer.com', { feeds: [rss('https://www.socialmediaexaminer.com/feed/', 'marketing')] }], // (v)
-  ['HubSpot', C, 'hubspot.com', { feeds: [rss('https://blog.hubspot.com/marketing/rss.xml', 'marketing')] }], // (v)
-  ['Think with Google', S, 'thinkwithgoogle.com'],
-  ['Meta Business', S, 'about.fb.com business.facebook.com meta.com'],
-  ['LinkedIn Marketing', C, 'business.linkedin.com marketing.linkedin.com'],
-  ['TikTok for Business', C, 'ads.tiktok.com business.tiktok.com'],
-  ['Nielsen', M, 'nielsen.com'],
-  ['Kantar', S, 'kantar.com'],
-  ['WARC', S, 'warc.com'],
-  ['IAB', S, 'iab.com'],
   ['Gartner', C, 'gartner.com'],
+  ['Meta Newsroom', S, 'about.fb.com meta.com'],
   ['McKinsey', C, 'mckinsey.com', { aliases: ['McKinsey Insights'], feeds: [rss('https://www.mckinsey.com/insights/rss', 'management')] }], // (v)
-  ['Marketing Dive', S, 'marketingdive.com', { feeds: [rss('https://www.marketingdive.com/feeds/news/', 'marketing')] }], // (v)(a)
 
   // Real estate & property
   ['The Real Deal', S, 'therealdeal.com'],
@@ -408,22 +389,6 @@ const DEFS: Def[] = [
   ['AM Best', M, 'ambest.com'],
   ['Kitco', S, 'kitco.com'],
   ['Commodity.com', N, 'commodity.com'],
-  // Marketing and advertising
-  ['Backlinko', N, 'backlinko.com', { feeds: [rss('https://backlinko.com/blog/feed', 'marketing')] }], // (v)
-  ['Chief Marketer', S, 'chiefmarketer.com', { feeds: [rss('https://www.chiefmarketer.com/feed', 'marketing')] }], // (v)
-  ['Convince & Convert', N, 'convinceandconvert.com', { feeds: [rss('https://www.convinceandconvert.com/feed', 'marketing')] }], // (v)
-  ['LBB Online', S, 'lbbonline.com littleblackbook.com', { aliases: ['Little Black Book'], feeds: [rss('https://lbbonline.com/news/feed', 'marketing')] }], // (v)
-  ['MarTech', S, 'martech.org marketingland.com', { aliases: ['Marketing Land'], feeds: [rss('https://martech.org/feed', 'marketing')] }], // (v)
-  ['Neil Patel', N, 'neilpatel.com', { feeds: [rss('https://neilpatel.com/blog/feed', 'marketing')] }], // (v)
-  ['Sprout Social Insights', N, 'sproutsocial.com', { feeds: [rss('https://sproutsocial.com/insights/feed/', 'marketing')] }], // (v)
-  ['AdExchanger', S, 'adexchanger.com', { feeds: [rss('https://www.adexchanger.com/feed/', 'marketing')] }], // (v)
-  ['WordStream', N, 'wordstream.com'],
-  ['MarketingProfs', S, 'marketingprofs.com'],
-  ['Media Life Magazine', S, 'medialifemagazine.com'],
-  ['MediaPost', S, 'mediapost.com'],
-  ['AdContrarian', N, 'adcontrarian.com'],
-  ['Creative Review', S, 'creativereview.co.uk'],
-  ['Ad Manager Blog', N, 'admanagerblog.com'],
   // Real estate
   ['Commercial Observer', S, 'commercialobserver.com', { feeds: [rss('https://commercialobserver.com/feed/', 'real_estate')] }], // (v)
   ['Real Estate Weekly', S, 'rew-online.com', { aliases: ['REW'], feeds: [rss('https://rew-online.com/feed', 'real_estate')] }], // (v)
@@ -491,7 +456,7 @@ const DEFS: Def[] = [
   ['Business Media', S, 'businessmedia.ge', { georgia: true }],
 
 
-  // ── Wider coverage (October 2026): trade, VC, marketing, real estate, crypto, geopolitics, AI ──────────────
+  // ── Wider coverage (October 2026): trade, VC, retail, real estate, crypto, geopolitics, AI ──────────────
   // Feeds probed on 2026-10-04: each answered with parseable items from the last ten days. Weights follow the tiers above.
   // Global trade, shipping, commodities
   ['Supply Chain Brain', S, 'supplychainbrain.com', { feeds: [rss('https://www.supplychainbrain.com/rss/articles', 'trade')] }], // (v)
@@ -517,14 +482,10 @@ const DEFS: Def[] = [
   ['Startups Magazine', S, 'startupsmagazine.co.uk', { feeds: [rss('https://startupsmagazine.co.uk/feed', 'startups')] }], // (v)
   ['The Next Web', S, 'thenextweb.com', { feeds: [rss('https://thenextweb.com/feed', 'startups')] }], // (v)
   ['Geekwire', S, 'geekwire.com', { feeds: [rss('https://www.geekwire.com/feed/', 'startups')] }], // (v)
-  // Marketing, advertising, retail
-  ['Social Media Today', S, 'socialmediatoday.com', { feeds: [rss('https://www.socialmediatoday.com/feeds/news/', 'marketing')] }], // (v)
-  ['Mumbrella', S, 'mumbrella.com.au', { feeds: [rss('https://mumbrella.com.au/feed', 'marketing')] }], // (v)
-  ['PPC Land', S, 'ppc.land', { feeds: [rss('https://ppc.land/rss/', 'marketing')] }], // (v)
-  ['Retail Dive', S, 'retaildive.com', { feeds: [rss('https://www.retaildive.com/feeds/news/', 'marketing')] }], // (v)
-  ['Modern Retail', S, 'modernretail.co', { feeds: [rss('https://www.modernretail.co/feed/', 'marketing')] }], // (v)
-  ['Retail Gazette', S, 'retailgazette.co.uk', { feeds: [rss('https://www.retailgazette.co.uk/feed/', 'marketing')] }], // (v)
-  ['Practical Ecommerce', S, 'practicalecommerce.com', { feeds: [rss('https://www.practicalecommerce.com/feed', 'marketing')] }], // (v)
+  // Retail
+  ['Retail Dive', S, 'retaildive.com', { feeds: [rss('https://www.retaildive.com/feeds/news/', 'economics')] }], // (v)
+  ['Modern Retail', S, 'modernretail.co', { feeds: [rss('https://www.modernretail.co/feed/', 'economics')] }], // (v)
+  ['Retail Gazette', S, 'retailgazette.co.uk', { feeds: [rss('https://www.retailgazette.co.uk/feed/', 'economics')] }], // (v)
   // Real estate
   ['Connect CRE', S, 'connectcre.com', { feeds: [rss('https://www.connectcre.com/feed/', 'real_estate')] }], // (v)
   ['Rismedia', S, 'rismedia.com', { feeds: [rss('https://www.rismedia.com/feed/', 'real_estate')] }], // (v)
@@ -588,7 +549,6 @@ const DEFS: Def[] = [
     gdelt('(inflation OR "central bank" OR "interest rates" OR GDP OR recession)', 'economics'),
     gdelt('(tariffs OR "supply chain" OR "trade deal" OR "export controls" OR "container rates")', 'trade'),
     gdelt('("venture capital" OR "funding round" OR "series A" OR "series B" OR "startup raises")', 'startups'),
-    gdelt('("ad spend" OR "advertising revenue" OR "marketing strategy" OR "brand marketing")', 'marketing'),
     gdelt('("real estate" OR mortgage OR "housing market" OR "commercial property")', 'real_estate'),
     gdelt('(bitcoin OR ethereum OR crypto OR stablecoin OR "digital assets")', 'crypto'),
     gdelt('("artificial intelligence" OR semiconductor OR OpenAI OR Nvidia OR "data center")', 'ai_tech'),
@@ -598,7 +558,6 @@ const DEFS: Def[] = [
   ['Bing News search', X, '', { feeds: [
     bing('global trade tariffs', 'trade'), bing('supply chain disruption shipping', 'trade'), bing('container freight rates ports', 'trade'), bing('export import trade deal', 'trade'),
     bing('startup funding round raises', 'startups'), bing('venture capital investment', 'startups'), bing('seed series A funding', 'startups'), bing('unicorn startup valuation', 'startups'),
-    bing('advertising industry news', 'marketing'), bing('digital marketing trends', 'marketing'), bing('brand campaign agency', 'marketing'), bing('social media advertising platform', 'marketing'),
     bing('real estate market prices', 'real_estate'), bing('mortgage rates housing market', 'real_estate'), bing('commercial real estate office', 'real_estate'), bing('property development investment', 'real_estate'),
     bing('bitcoin price market', 'crypto'), bing('ethereum stablecoin regulation', 'crypto'), bing('crypto exchange ETF', 'crypto'),
     bing('artificial intelligence companies news', 'ai_tech'), bing('semiconductor chips supply', 'ai_tech'), bing('big tech earnings', 'ai_tech'),
@@ -623,12 +582,9 @@ const EXTRA_FEEDS = new Map<string, FeedDef[]>([
   ['Fast Company', [rss('https://www.fastcompany.com/technology/rss', 'ai_tech')]],
   ['Global Trade Magazine', [rss('https://www.globaltrademag.com/feed/', 'trade')]],
   ['Investing.com', [rss('https://www.investing.com/rss/news.rss', 'investments')]],
-  ['MarTech', [rss('https://martech.org/feed/', 'marketing'), rss('https://marketingland.com/feed', 'marketing')]],
   ['Mining.com', [rss('https://www.mining.com/feed/', 'trade')]],
-  ['Neil Patel', [rss('https://neilpatel.com/blog/feed/', 'marketing')]],
   ['OilPrice.com', [rss('https://oilprice.com/rss/main', 'trade')]],
   ['Redfin Research', [rss('https://www.redfin.com/news/feed/', 'real_estate')]],
-  ['SEJ', [rss('https://www.searchenginejournal.com/feed/', 'marketing')]],
   ['Seeking Alpha', [rss('https://seekingalpha.com/market_currents.xml', 'investments')]],
   ['TechCrunch', [rss('https://techcrunch.com/category/venture/feed/', 'startups')]],
   ['Techmeme', [rss('https://www.techmeme.com/feed.xml', 'ai_tech')]],
@@ -665,7 +621,6 @@ export const SOURCE_CATEGORIES: SourceCategory[] = [
   { id: 'georgia', label: 'Georgia Focus', articleCategory: 'Economics', sources: ['National Bank of Georgia', 'GeoStat', 'Ministry of Finance of Georgia', 'Revenue Service', 'Georgian Stock Exchange'] },
   { id: 'investments', label: 'Investments & Markets', articleCategory: 'Economics', sources: ['SEC EDGAR', 'Fed', 'ECB', 'BoE', 'US Treasury', 'FINRA', 'Morningstar', 'S&P Global', "Moody's", 'Fitch Ratings', 'CME Group', 'Nasdaq', 'NYSE', 'LSE', 'Trading Economics', 'FRED', 'Investing.com', 'Stock Exchange of Georgia', 'Refinitiv'] },
   { id: 'crypto', label: 'Crypto & Digital Assets', articleCategory: 'Crypto', sources: ['CoinDesk', 'Cointelegraph', 'The Block', 'Decrypt', 'Blockworks', 'DL News', 'Bloomberg Crypto', 'Reuters Crypto', 'Messari', 'Chainalysis', 'Glassnode', 'CoinGecko', 'CoinMarketCap', 'DefiLlama', 'Dune', 'Kaiko', 'CryptoQuant', 'FATF', 'SEC', 'ESMA'] },
-  { id: 'marketing', label: 'Marketing & Advertising', articleCategory: 'Marketing', sources: ['Marketing Week', 'Ad Age', 'Adweek', 'Digiday', 'Campaign', 'The Drum', 'SEJ', 'SEL', 'Social Media Examiner', 'HubSpot', 'Think with Google', 'Meta Business', 'LinkedIn Marketing', 'TikTok for Business', 'Nielsen', 'Kantar', 'WARC', 'IAB', 'Gartner', 'McKinsey'] },
   { id: 'real_estate', label: 'Real Estate & Property', articleCategory: 'Real Estate', sources: ['Reuters RE', 'Bloomberg RE', 'FT Property', 'The Real Deal', 'Bisnow', 'GlobeSt', 'Property Week', 'CoStar', 'Zillow Research', 'Redfin Research', 'CBRE', 'JLL', 'Knight Frank', 'Savills', 'Cushman & Wakefield', 'ULI', 'OECD Housing', 'World Bank Urban', 'GeoStat', 'NBG'] },
   { id: 'trade', label: 'Global Trade & Supply Chains', articleCategory: 'Global Trade', sources: ['WTO', 'UN Comtrade', 'UNCTAD', 'ITC', 'WCO', 'World Bank Trade', 'OECD Trade', 'Eurostat Trade', 'US Census', 'US ITC', 'IMF DOTS', 'Freightos', 'Drewry', 'S&P Global Supply Chain', 'CTS', 'Baltic Exchange', "Lloyd's List", 'JOC', 'The Loadstar', 'ShippingWatch'] },
   { id: 'banks', label: 'Banks & Financial Institutions', articleCategory: 'Economics', sources: ['BIS', 'FSB', 'IMF', 'Fed', 'ECB', 'BoE', 'NBG', 'EBA', 'OCC', 'FDIC', 'Basel Committee', 'Reuters Banks', 'Bloomberg Banks', 'American Banker', 'The Banker', 'Risk.net', 'S&P Banking', "Moody's Banking", 'Fitch Banking', 'Coalition Greenwich'] },
