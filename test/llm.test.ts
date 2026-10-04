@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { LlmError, createLlm, parseJson, resetModelFallbacks } from '../src/pipeline/llm';
 import type { Env } from '../src/types';
@@ -98,6 +98,20 @@ describe('a stage model that is out of quota falls back to the default model', (
     const { llm: denied, calls: dc } = setup([new Response('{"error":{"code":403}}', { status: 403 }), reply('{"ok":true}')], { GEMINI_MODEL: 'base-model' });
     await denied.json({ system: 's', user: 'u', schema, label: 't', model: 'private-model' });
     expect(dc.map((c) => model(c.url))).toEqual(['private-model', 'base-model']);
+  });
+
+  it('an overloaded override (503) falls back for a short while, not ten minutes', async () => {
+    const down = () => new Response('{"error":{"code":503,"message":"The model is overloaded. Please try again later.","status":"UNAVAILABLE"}}', { status: 503 });
+    const { llm, calls } = setup([down(), down(), reply('{"ok":true}'), reply('{"ok":true}')], { GEMINI_MODEL: 'base-model' });
+    expect(await llm.json({ system: 's', user: 'u', schema, label: 't', model: 'big-model' })).toEqual({ ok: true });
+    expect(await llm.json({ system: 's', user: 'u', schema, label: 't', model: 'big-model' })).toEqual({ ok: true });
+    expect(calls.map((c) => model(c.url))).toEqual(['big-model', 'big-model', 'base-model', 'base-model']); // not retried on the big model right after
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 3 * 60_000); // two minutes later it is tried again
+    const { llm: later, calls: lc } = setup([reply('{"ok":true}')], { GEMINI_MODEL: 'base-model' });
+    await later.json({ system: 's', user: 'u', schema, label: 't', model: 'big-model' });
+    vi.useRealTimers();
+    expect(lc.map((c) => model(c.url))).toEqual(['big-model']);
   });
 
   it('other errors on the override are not hidden, and the default model itself is never swapped out', async () => {

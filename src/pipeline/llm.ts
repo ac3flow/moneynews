@@ -28,12 +28,13 @@ export class LlmError extends Error {
   }
 }
 
-// A model chosen for one stage (GEMINI_MODEL_KA) can be out of quota or not open to this key. Rather than stall
-// the pipeline, that call falls back to the default model, and the override is not tried again for a while.
-const OVERRIDE_RETRY_MS = 10 * 60_000;
+// A model chosen for one stage (GEMINI_MODEL_KA) can be out of quota, not open to this key, or overloaded. Rather
+// than stall the pipeline, that call falls back to the default model, and the override is not tried again for a while:
+// ten minutes for quota and access (403, 404, 429), two for an overloaded or failing service (500, 502, 503, 504).
 const unavailable = new Map<string, number>();
 export const resetModelFallbacks = (): void => unavailable.clear();
-const FALLBACK_STATUS = new Set([403, 404, 429]);
+const pauseFor = (status: number): number | null =>
+  status === 403 || status === 404 || status === 429 ? 10 * 60_000 : status === 500 || status === 502 || status === 503 || status === 504 ? 2 * 60_000 : null;
 
 const DEFAULT_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const REQUEST_TIMEOUT_MS = 90_000;
@@ -56,9 +57,10 @@ export function createLlm(env: Env, fetchImpl: typeof fetch = fetch): Llm | null
     try {
       return await callModel(system, contents, wanted);
     } catch (e) {
-      if (wanted === model || !(e instanceof LlmError) || e.status === undefined || !FALLBACK_STATUS.has(e.status)) throw e;
-      unavailable.set(wanted, Date.now() + OVERRIDE_RETRY_MS);
-      console.warn(`Gemini model ${wanted} answered ${e.status}; using ${model} for the next ${OVERRIDE_RETRY_MS / 60_000} minutes`);
+      const pause = e instanceof LlmError && e.status !== undefined ? pauseFor(e.status) : null;
+      if (wanted === model || pause === null) throw e;
+      unavailable.set(wanted, Date.now() + pause);
+      console.warn(`Gemini model ${wanted} answered ${(e as LlmError).status}; using ${model} for the next ${pause / 60_000} minutes`);
       return callModel(system, contents, model);
     }
   }
