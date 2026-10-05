@@ -18,5 +18,5 @@ export const SCHEMA_STATEMENTS: string[] = [
   "CREATE TABLE IF NOT EXISTS pipeline_events ( id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT, article_id TEXT, stage TEXT NOT NULL, outcome TEXT NOT NULL, detail TEXT, created_at TEXT NOT NULL )",
   "CREATE INDEX IF NOT EXISTS idx_events_article ON pipeline_events(article_id, id DESC)",
   "CREATE INDEX IF NOT EXISTS idx_events_stage ON pipeline_events(stage, id DESC)",
-  "CREATE TABLE IF NOT EXISTS llm_usage ( day TEXT NOT NULL, model TEXT NOT NULL, calls INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, model) )"
+  "CREATE TABLE IF NOT EXISTS llm_usage ( day TEXT NOT NULL, model TEXT NOT NULL, calls INTEGER NOT NULL DEFAULT 0, prompt_tokens INTEGER NOT NULL DEFAULT 0, completion_tokens INTEGER NOT NULL DEFAULT 0, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (day, model) )"
 ];
