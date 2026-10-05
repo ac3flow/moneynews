@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS articles (
 CREATE INDEX IF NOT EXISTS idx_status_published ON articles(status, published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_trust_score ON articles(trust_score DESC);
 CREATE INDEX IF NOT EXISTS idx_category ON articles(category);
+-- The research stage counts recent stories per topic (created_at >= ...) on every run.
+CREATE INDEX IF NOT EXISTS idx_articles_created ON articles(created_at, status, category, georgia_related);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Operational tables (not part of the content model above). All timestamps UTC.
@@ -48,6 +50,8 @@ CREATE TABLE IF NOT EXISTS feed_items (
 
 CREATE INDEX IF NOT EXISTS idx_feed_items_pool ON feed_items(article_id, published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_feed_items_fetched ON feed_items(fetched_at);
+-- Without this, asking "has this feed ever produced an item?" reads the whole table on every collect.
+CREATE INDEX IF NOT EXISTS idx_feed_items_feed ON feed_items(feed_id);
 
 -- Georgian (and any future language) versions of an article. The English text stays in `articles`.
 -- A row is created by the Translator (grammar_checked = 0) and finished by the Georgian Grammar
@@ -120,6 +124,8 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_runs_started ON pipeline_runs(started_at DESC);
+-- Every run sweeps for dead 'running' rows; this keeps that to the few rows that are actually running.
+CREATE INDEX IF NOT EXISTS idx_runs_status ON pipeline_runs(status, started_at);
 
 -- Audit trail: every stage decision per article (incl. trust-score breakdown and
 -- reject reasons) and per-feed failures.
@@ -135,3 +141,14 @@ CREATE TABLE IF NOT EXISTS pipeline_events (
 
 CREATE INDEX IF NOT EXISTS idx_events_article ON pipeline_events(article_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_events_stage ON pipeline_events(stage, id DESC);
+
+-- Daily count of Gemini calls per model, for the GEMINI_DAILY_CALLS budget (src/pipeline/budget.ts).
+CREATE TABLE IF NOT EXISTS llm_usage (
+    day TEXT NOT NULL,
+    model TEXT NOT NULL,
+    calls INTEGER NOT NULL DEFAULT 0,
+    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (day, model)
+);
