@@ -127,8 +127,10 @@ Do not report matters of taste, and do not report Latin script used for names. I
 
 ${UNTRUSTED}
 
-Return JSON: {"articles":[{"id","ok","problems":[{"field","text","problem"}]}]} with the same ids. "field" is one of headline, summary, what_happened, why_it_matters, figures_dates, affected_entities, risks_uncertainty.`;
-
+export const FACTCHECK_PROMPT = `
+... წინა ტექსტი ...
+Return JSON: {"articles":[{"id":"1","ok":true,"problems":[{"field":"title","text":"..."}]}]}
+`;
 
 export const FACTCHECK_PROMPT = `
 ... other prompt text ...
