@@ -7,7 +7,10 @@
 //     pass the Fact-Checker's double-sourcing rule (>= 2 independent non-social
 //     publishers, or one primary/official source) -- OR, for topics where genuine
 //     double-sourcing is structurally rare (Real Estate, VC & Startups, anything
-//     Georgia-flagged), one credible specialist-press source (weight >= 3.5).
+//     Georgia-flagged), one credible specialist-press source (weight >= 3.5). This
+//     SINGLE_SOURCE_OK rule is defined once in scoring.ts and imported here AND by
+//     factcheck.ts's final gate, so a story that is allowed to be drafted can never
+//     then be unconditionally rejected later for the same reason it was let through.
 //     Corroborating items often arrive in different runs, which is why the pool exists.
 //     Most runs end here with no LLM call.
 //  4. Ask the LLM to draft one briefing per top cluster, using only the cluster's text.
@@ -25,7 +28,7 @@ import { importanceScore } from './importance';
 import { fetchFeed, sha, type RawItem } from './feeds';
 import { RESEARCH_SYSTEM } from './prompts';
 import { ResearchOutput } from './schemas';
-import { scoreArticle, type Citation } from './scoring';
+import { scoreArticle, SINGLE_SOURCE_OK, SINGLE_SOURCE_MIN_WEIGHT, type Citation } from './scoring';
 
 const MAX_ITEM_AGE_MS = 72 * 3600_000; // ignore very old feed items on ingest
 const POOL_WINDOW_MS = 36 * 3600_000; // how long an unused item stays eligible
@@ -49,6 +52,11 @@ export interface ClusterEval {
   independent: number;
   best: number;
   hasPrimary: boolean;
+  /** Whether this cluster may publish on one credible specialist source instead of two
+   * independents (Real Estate / VC & Startups / Georgia-flagged) -- passed straight into
+   * scoreArticle by canReachThreshold, so the pre-draft check and the final fact-check gate
+   * (factcheck.ts) always agree on the same cluster. */
+  singleSourceOk: boolean;
   eligible: boolean;
   priority: number;
 }
@@ -75,19 +83,11 @@ function roundRobinKey(items: FeedItemRow[]): string | null {
 }
 
 /**
- * Topics where genuine double-sourcing is structurally rare: few outlets cover the exact same
- * individual real-estate deal or funding round the way wire services all cover a ceasefire. One
- * credible specialist-press source is accepted instead of requiring two independents.
- */
-const SINGLE_SOURCE_OK: ReadonlySet<string> = new Set(['Real Estate', 'VC & Startups']);
-const SINGLE_SOURCE_MIN_WEIGHT = 3.5;
-
-/**
  * Even if every claim is backed, can these sources reach the publish threshold? A cluster of two unknown blogs is
  * "double-sourced" but cannot score high enough, so drafting it would only spend model calls on a story that is rejected.
  */
 export const canReachThreshold = (ev: ClusterEval, threshold: number): boolean =>
-  scoreArticle(ev.citations, { total: 10, supported: 10, contradicted: 0 }, threshold).decision === 'publish';
+  scoreArticle(ev.citations, { total: 10, supported: 10, contradicted: 0 }, threshold, ev.singleSourceOk).decision === 'publish';
 
 /**
  * Choose the clusters to draft. Within each round-robin lane (article category, or 'Georgia' for any
@@ -158,10 +158,11 @@ export function evaluateCluster(items: FeedItemRow[], now: number): ClusterEval 
   const georgia = items.some((i) => i.georgia);
   const topic = hintOf(items);
   // One credible specialist source is enough for a structurally thin topic (or any Georgia story),
-  // instead of requiring two independents.
-  const singleOk = (georgia || (topic != null && SINGLE_SOURCE_OK.has(topic))) && best >= SINGLE_SOURCE_MIN_WEIGHT;
+  // instead of requiring two independents. Same rule factcheck.ts applies at the final gate.
+  const singleSourceOk = georgia || (topic != null && SINGLE_SOURCE_OK.has(topic));
+  const soloReady = singleSourceOk && best >= SINGLE_SOURCE_MIN_WEIGHT;
   const priority = (hasPrimary ? 3 : 0) + independent + best / 5 + (georgia ? 0.5 : 0) + Math.max(0, 1 - ageHours / 12);
-  return { citations, independent, best, hasPrimary, eligible: solid.length > 0 && (independent >= 2 || hasPrimary || singleOk), priority };
+  return { citations, independent, best, hasPrimary, singleSourceOk, eligible: solid.length > 0 && (independent >= 2 || hasPrimary || soloReady), priority };
 }
 
 // ─── collect ────────────────────────────────────────────────────────────────
