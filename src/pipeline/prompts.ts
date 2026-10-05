@@ -128,3 +128,6 @@ Do not report matters of taste, and do not report Latin script used for names. I
 ${UNTRUSTED}
 
 Return JSON: {"articles":[{"id","ok","problems":[{"field","text","problem"}]}]} with the same ids. "field" is one of headline, summary, what_happened, why_it_matters, figures_dates, affected_entities, risks_uncertainty.`;
+
+
+Return JSON: {"articles":[{"id","ok","problems":[{"field","text","problem"}]}]} with the same ids. "field" is one of headline, summary, what_happened, why_it_matters, figures_dates, affected_entities, risks_uncertainty.`;
