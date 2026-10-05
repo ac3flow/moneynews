@@ -3,6 +3,7 @@ import { resolveSource } from './registry/trust';
 import { ensureSchema } from './db-init';
 import { PIPELINE_ORDER, STAGE_NAMES, runPipeline, type StageName } from './pipeline/run';
 import { parseLinks } from './pipeline/citations';
+import { quotaDay } from './pipeline/budget';
 import { SLOT_MS, TBILISI_OFFSET_MIN, TIMEZONE, dayRangeUtc, formatSlot, isDate, nextSlot, nowIso, parseSlotMinute, slotRangeUtc, tbilisiDate } from './time';
 import { parseCharts } from './pipeline/schemas';
 import { stockPhotoFor } from './stock-photos';
@@ -371,12 +372,14 @@ async function meta(env: Env): Promise<Response> {
 
 async function status(env: Env): Promise<Response> {
   const since = nowIso(Date.now() - 24 * 3600_000);
-  const [run, queue, feedErrors, lastError] = await Promise.all([
+  const [run, queue, feedErrors, lastError, usage] = await Promise.all([
     env.DB.prepare(`SELECT run_id, trigger, started_at, finished_at, status, stats FROM pipeline_runs ORDER BY started_at DESC LIMIT 1`).first<Record<string, string | null>>(),
     env.DB.prepare(`SELECT status, COUNT(*) AS n FROM articles GROUP BY status`).all<{ status: string; n: number }>(),
     env.DB.prepare(`SELECT COUNT(*) AS n FROM pipeline_events WHERE stage = 'feed' AND outcome = 'error' AND created_at >= ?1`).bind(since).first<{ n: number }>(),
     // Most recent stage-level failure (e.g. Gemini rejecting the model name), newest first.
     env.DB.prepare(`SELECT stage, detail, created_at FROM pipeline_events WHERE outcome = 'error' AND article_id IS NULL AND stage != 'feed' AND created_at >= ?1 ORDER BY id DESC LIMIT 1`).bind(since).first<{ stage: string; detail: string | null; created_at: string }>(),
+    // Gemini requests counted today (Pacific quota day) when a daily call budget is set; see pipeline/budget.ts.
+    env.DB.prepare(`SELECT model, calls FROM llm_usage WHERE day = ?1`).bind(quotaDay(Date.now()).day).all<{ model: string; calls: number }>(),
   ]);
   let lastErrorOut: { stage: string; at: string; message: string } | null = null;
   if (lastError) {
@@ -396,6 +399,7 @@ async function status(env: Env): Promise<Response> {
     articles: Object.fromEntries(queue.results.map((r) => [r.status, r.n])),
     feedErrors24h: feedErrors?.n ?? 0,
     lastError: lastErrorOut,
+    geminiCallsToday: Object.fromEntries(usage.results.map((r) => [r.model, r.calls])),
   });
 }
 // ─── GET /api/ai-tech-directory ─────────────────────────────────────────────

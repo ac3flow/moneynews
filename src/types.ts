@@ -10,12 +10,18 @@ export interface Env {
   GEMINI_MODEL?: string;
   /** Optional stronger model for the two Georgian stages (translate, ka_grammar). */
   GEMINI_MODEL_KA?: string;
+  /** Most Gemini requests per day for GEMINI_MODEL (0/unset = unlimited). Spread evenly over the day, resets at midnight Pacific. */
+  GEMINI_DAILY_CALLS?: string;
+  /** Same, for GEMINI_MODEL_KA. */
+  GEMINI_DAILY_CALLS_KA?: string;
   /** 'staged' (default): several cron triggers, one slice of the pipeline each. 'single': one trigger runs everything. */
   PIPELINE_MODE?: string;
   /** Optional: route Gemini calls through a gateway (e.g. Cloudflare AI Gateway) or a test server. */
   GEMINI_BASE_URL?: string;
   FEEDS_PER_RUN?: string;
   MAX_ARTICLES_PER_RUN?: string;
+  /** Most stories each topic may get per 5-minute slot (0 = off: the old fair-share pick). */
+  PER_TOPIC_PER_RUN?: string;
   PUBLISH_THRESHOLD?: string;
   /** Open-web news search providers to use, comma separated: 'bing', 'gdelt' (default both), or 'off'. */
   WEB_SEARCH?: string;

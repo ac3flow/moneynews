@@ -1,0 +1,548 @@
+import { describe, expect, it } from 'vitest';
+import { handleApi, parseFigures, parseListQuery } from '../src/api';
+import { STOCK_PHOTOS, stockPhotoFor } from '../src/stock-photos';
+import { insertArticle, insertImage, insertImportance, insertTranslation, makeEnv } from './helpers';
+
+type Env = ReturnType<typeof makeEnv>;
+
+async function get(env: Env, path: string) {
+  const res = await handleApi(new Request(`https://news.test${path}`), env);
+  return { status: res.status, body: (await res.json()) as any, headers: res.headers };
+}
+
+const pub = (env: Env, id: string, at: string, extra: Record<string, unknown> = {}) =>
+  insertArticle(env, { id, status: 'published', fact_checked: 1, grammar_checked: 1, published_at: at, trust_score: 70, headline: `Headline ${id} goes here`, ...extra });
+
+describe('GET /api/articles', () => {
+  it('returns only published, fact-checked articles, newest first, with sources enriched', async () => {
+    const env = makeEnv();
+    pub(env, 'a1', '2026-10-03T10:00:00.000Z', { source_links: JSON.stringify([{ title: 'Fed statement', url: 'https://www.federalreserve.gov/x', trust_score: 5 }, { title: 'HN', url: 'https://news.ycombinator.com/item?id=1', trust_score: 1.5 }, { title: 'bad', url: 'javascript:alert(1)', trust_score: 5 }]), figures_dates: 'Rate: 4.25%\n- Next meeting: 28 October\nplain line', affected_entities: 'Fed, Markets , ' });
+    pub(env, 'a2', '2026-10-03T11:00:00.000Z');
+    insertArticle(env, { id: 'raw', status: 'raw_research' });
+    insertArticle(env, { id: 'rej', status: 'rejected', fact_checked: 1, published_at: '2026-10-03T12:00:00.000Z' });
+    insertArticle(env, { id: 'unchecked', status: 'published', fact_checked: 0, published_at: '2026-10-03T12:30:00.000Z' });
+
+    const { status, body } = await get(env, '/api/articles');
+    expect(status).toBe(200);
+    expect(body.timezone).toBe('Asia/Tbilisi');
+    expect(body.articles.map((a: any) => a.id)).toEqual(['a2', 'a1']);
+    const a1 = body.articles[1];
+    expect(a1.figures).toEqual([{ label: 'Rate', value: '4.25%' }, { label: 'Next meeting', value: '28 October' }, { label: '', value: 'plain line' }]);
+    expect(a1.affected_entities).toEqual(['Fed', 'Markets']);
+    expect(a1.sources).toEqual([
+      { title: 'Fed statement', url: 'https://www.federalreserve.gov/x', name: 'Fed', tier: 'primary' },
+      { title: 'HN', url: 'https://news.ycombinator.com/item?id=1', name: 'Hacker News', tier: 'social' },
+    ]); // a tier label, never a number
+    expect(a1).not.toHaveProperty('trust_score');
+    expect(a1.published_at).toBe('2026-10-03T10:00:00.000Z'); // UTC on the wire
+  });
+
+  it('Top 10 ranks by importance, not trust, newest first on ties, with ranks', async () => {
+    const env = makeEnv();
+    const ago = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
+    // trust runs the opposite way to importance on purpose
+    const rows: [string, number, number][] = [['i1', 55, 95], ['i2', 91, 90], ['i3', 70, 80], ['i4', 88, 70], ['i5', 99, 60], ['i6', 62, 50], ['i7', 93, 40], ['i8', 70, 30], ['i9', 81, 20], ['i10', 76, 10], ['i11', 64, 5], ['i12', 66, 5]];
+    rows.forEach(([id, trust, importance], k) => {
+      pub(env, id, ago(1 + k * 0.001), { trust_score: trust });
+      insertImportance(env, id, importance);
+    });
+    const { body } = await get(env, '/api/articles?tab=top10&limit=3');
+    expect(body.articles).toHaveLength(10);
+    expect(body.articles.map((a: any) => a.id)).toEqual(['i1', 'i2', 'i3', 'i4', 'i5', 'i6', 'i7', 'i8', 'i9', 'i10']);
+    expect(body.articles.map((a: any) => a.importance)).toEqual([95, 90, 80, 70, 60, 50, 40, 30, 20, 10]);
+    expect(body.articles.map((a: any) => a.rank)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(body.articles[0].id).toBe('i1'); // the most important story is not the most trusted
+    expect(body.articles[0]).not.toHaveProperty('trust_score');
+    expect(body.nextBefore).toBeNull();
+  });
+
+  it('Top 10 favours what matters now: an old shock gives way to fresh news of lesser size', async () => {
+    const env = makeEnv();
+    const ago = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
+    pub(env, 'old', ago(60), { trust_score: 95 });
+    insertImportance(env, 'old', 90); // 90 - 0.8 x 60 = 42
+    pub(env, 'fresh', ago(1), { trust_score: 60 });
+    insertImportance(env, 'fresh', 55); // 55 - 0.8 = 54
+    pub(env, 'fresher', ago(0.2), { trust_score: 60 });
+    insertImportance(env, 'fresher', 55);
+    const { body } = await get(env, '/api/articles?tab=top10');
+    expect(body.articles.map((a: any) => a.id)).toEqual(['fresher', 'fresh', 'old']);
+  });
+
+  it('stories from before importance existed are ranked by a stand-in from their trust score', async () => {
+    const env = makeEnv();
+    const ago = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
+    pub(env, 'legacy', ago(1), { trust_score: 90 }); // stand-in 54
+    pub(env, 'rated', ago(1), { trust_score: 60 });
+    insertImportance(env, 'rated', 70);
+    const { body } = await get(env, '/api/articles?tab=top10');
+    expect(body.articles.map((a: any) => [a.id, a.importance])).toEqual([['rated', 70], ['legacy', 54]]);
+    expect((await get(env, '/api/articles/rated')).body.article.importance).toBe(70);
+  });
+
+  it('filters Georgia Focus by flag and categories by tab', async () => {
+    const env = makeEnv();
+    pub(env, 'g', '2026-10-03T10:00:00.000Z', { georgia_related: 1, category: 'Economics' });
+    pub(env, 'e', '2026-10-03T10:01:00.000Z', { category: 'Economics' });
+    pub(env, 'c', '2026-10-03T10:02:00.000Z', { category: 'Crypto' });
+    pub(env, 'v', '2026-10-03T10:03:00.000Z', { category: 'VC & Startups' });
+    const ids = async (q: string) => (await get(env, `/api/articles?${q}`)).body.articles.map((a: any) => a.id);
+    expect(await ids('tab=georgia')).toEqual(['g']);
+    expect(await ids('tab=economics')).toEqual(['e', 'g']);
+    expect(await ids('tab=crypto')).toEqual(['c']);
+    expect(await ids('tab=vc-startups')).toEqual(['v']);
+    expect(await ids('tab=all')).toEqual(['v', 'c', 'e', 'g']);
+    expect(await ids('tab=real-estate')).toEqual([]);
+  });
+
+  describe('5-minute time search (Asia/Tbilisi = UTC+4)', () => {
+    const seed = (env: Env) => {
+      pub(env, 'in-start', '2026-10-03T13:15:00.000Z'); // 17:15:00 Tbilisi
+      pub(env, 'in-mid', '2026-10-03T13:17:42.500Z'); //   17:17
+      pub(env, 'in-end', '2026-10-03T13:19:59.999Z'); //   17:19:59
+      pub(env, 'out-next', '2026-10-03T13:20:00.000Z'); // 17:20 -> next slot
+      pub(env, 'out-prev', '2026-10-03T13:14:59.999Z'); // 17:14
+      pub(env, 'other-day', '2026-10-02T13:16:00.000Z'); // 17:16 on the previous day
+      pub(env, 'morning', '2026-10-03T05:30:00.000Z'); //   09:30
+      pub(env, 'late-night', '2026-10-03T19:57:00.000Z'); // 23:57
+      pub(env, 'after-midnight', '2026-10-03T20:02:00.000Z'); // 00:02 next Tbilisi day
+    };
+
+    it('matches the half-open window [HH:MM, HH:MM+5) on any day', async () => {
+      const env = makeEnv();
+      seed(env);
+      const { body } = await get(env, '/api/articles?time=17:15');
+      expect(body.filter).toEqual({ date: null, time: '17:15' });
+      expect(body.articles.map((a: any) => a.id).sort()).toEqual(['in-end', 'in-mid', 'in-start', 'other-day']);
+    });
+
+    it('snaps an off-grid minute down to its slot', async () => {
+      const env = makeEnv();
+      seed(env);
+      const { body } = await get(env, '/api/articles?time=17:18');
+      expect(body.filter.time).toBe('17:15');
+      expect(body.articles).toHaveLength(4);
+    });
+
+    it('combines with a Tbilisi calendar date', async () => {
+      const env = makeEnv();
+      seed(env);
+      const d3 = await get(env, '/api/articles?time=17:15&date=2026-10-03');
+      expect(d3.body.articles.map((a: any) => a.id).sort()).toEqual(['in-end', 'in-mid', 'in-start']);
+      const d2 = await get(env, '/api/articles?time=17:15&date=2026-10-02');
+      expect(d2.body.articles.map((a: any) => a.id)).toEqual(['other-day']);
+    });
+
+    it('finds the morning slot and handles the day boundary', async () => {
+      const env = makeEnv();
+      seed(env);
+      expect((await get(env, '/api/articles?time=09:30')).body.articles.map((a: any) => a.id)).toEqual(['morning']);
+      expect((await get(env, '/api/articles?time=23:55')).body.articles.map((a: any) => a.id)).toEqual(['late-night']);
+      // 00:02 Tbilisi on 4 Oct belongs to the 4 Oct Tbilisi date, not 3 Oct
+      expect((await get(env, '/api/articles?time=00:00')).body.articles.map((a: any) => a.id)).toEqual(['after-midnight']);
+      expect((await get(env, '/api/articles?time=00:00&date=2026-10-04')).body.articles.map((a: any) => a.id)).toEqual(['after-midnight']);
+      expect((await get(env, '/api/articles?time=00:00&date=2026-10-03')).body.articles).toEqual([]);
+    });
+
+    it('a date alone returns the whole Tbilisi day', async () => {
+      const env = makeEnv();
+      seed(env);
+      const ids = (await get(env, '/api/articles?date=2026-10-03&limit=50')).body.articles.map((a: any) => a.id);
+      expect(ids).toContain('late-night');
+      expect(ids).not.toContain('after-midnight');
+      expect(ids).not.toContain('other-day');
+    });
+
+    it('works together with a tab, and Top 10 respects it', async () => {
+      const env = makeEnv();
+      pub(env, 'a', '2026-10-03T13:16:00.000Z', { trust_score: 60, georgia_related: 1 });
+      pub(env, 'b', '2026-10-03T13:17:00.000Z', { trust_score: 95 });
+      pub(env, 'c', '2026-10-03T08:00:00.000Z', { trust_score: 99 });
+      expect((await get(env, '/api/articles?time=17:15&tab=georgia')).body.articles.map((a: any) => a.id)).toEqual(['a']);
+      expect((await get(env, '/api/articles?time=17:15&tab=top10')).body.articles.map((a: any) => a.id)).toEqual(['b', 'a']);
+    });
+  });
+
+  it('paginates with a stable cursor, including identical timestamps', async () => {
+    const env = makeEnv();
+    for (let i = 0; i < 7; i++) pub(env, `p${i}`, `2026-10-03T10:0${Math.floor(i / 2)}:00.000Z`); // pairs share a timestamp
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 5; page++) {
+      const { body } = await get(env, `/api/articles?limit=3${cursor ? `&before=${encodeURIComponent(cursor)}` : ''}`);
+      seen.push(...body.articles.map((a: any) => a.id));
+      cursor = body.nextBefore;
+      if (!cursor) break;
+    }
+    expect(seen).toHaveLength(7);
+    expect(new Set(seen).size).toBe(7);
+  });
+
+  it('rejects malformed parameters with 400, never SQL errors', async () => {
+    const env = makeEnv();
+    for (const q of ['tab=nope', 'time=25:00', 'time=9:30', 'date=2026-13-40', 'date=yesterday', 'limit=0', 'limit=abc', "before=x'; DROP TABLE articles;--", 'tab=all%27--']) {
+      const r = await get(env, `/api/articles?${q}`);
+      expect(r.status, q).toBe(400);
+    }
+    expect((await get(env, '/api/articles?limit=9999')).status).toBe(200);
+    expect(parseListQuery(new URLSearchParams('limit=9999'))).toMatchObject({ limit: 50 });
+  });
+});
+
+describe('Georgian (lang=ka)', () => {
+  const seed = (env: Env) => {
+    pub(env, 'a1', '2026-10-03T10:00:00.000Z', { trust_score: 90, figures_dates: 'Rate: 4.25%', affected_entities: 'Fed, Markets' });
+    insertTranslation(env, 'a1', { headline: 'ფედმა განაკვეთი არ შეცვალა', figures_dates: 'განაკვეთი: 4.25%', affected_entities: 'ფედი, ბაზრები' });
+    pub(env, 'a2', '2026-10-03T11:00:00.000Z', { trust_score: 70 });
+    insertTranslation(env, 'a2', { grammar_checked: 0 }); // translated but not yet grammar-checked
+    pub(env, 'a3', '2026-10-03T12:00:00.000Z', { trust_score: 80 }); // no translation at all
+  };
+
+  it('defaults to English and returns every published story', async () => {
+    const env = makeEnv();
+    seed(env);
+    const { body } = await get(env, '/api/articles');
+    expect(body.lang).toBe('en');
+    expect(body.articles.map((a: any) => a.id)).toEqual(['a3', 'a2', 'a1']);
+    expect(body.articles[2].headline).toBe('Headline a1 goes here');
+  });
+
+  it('lang=ka returns the Georgian text, and only stories whose Georgian passed the grammar check', async () => {
+    const env = makeEnv();
+    seed(env);
+    const { body } = await get(env, '/api/articles?lang=ka');
+    expect(body.lang).toBe('ka');
+    expect(body.articles.map((a: any) => a.id)).toEqual(['a1']);
+    const a = body.articles[0];
+    expect(a).toMatchObject({ lang: 'ka', headline: 'ფედმა განაკვეთი არ შეცვალა' });
+    expect(a.figures).toEqual([{ label: 'განაკვეთი', value: '4.25%' }]);
+    expect(a.affected_entities).toEqual(['ფედი', 'ბაზრები']);
+    expect(a.sources[0].name).toBe('Reuters'); // sources are shared across languages
+  });
+
+  it('tabs, Top 10, time filters and cursors all work in Georgian', async () => {
+    const env = makeEnv();
+    for (let i = 0; i < 4; i++) {
+      pub(env, `k${i}`, `2026-10-03T13:1${i}:00.000Z`, { trust_score: 60 + i, category: i % 2 ? 'Crypto' : 'Economics', georgia_related: i === 0 ? 1 : 0 });
+      insertTranslation(env, `k${i}`);
+    }
+    const ids = async (q: string) => (await get(env, `/api/articles?lang=ka&${q}`)).body.articles.map((a: any) => a.id);
+    expect(await ids('tab=crypto')).toEqual(['k3', 'k1']);
+    expect(await ids('tab=georgia')).toEqual(['k0']);
+    expect(await ids('tab=top10')).toEqual(['k3', 'k2', 'k1', 'k0']);
+    expect(await ids('time=17:10')).toEqual(['k3', 'k2', 'k1', 'k0']);
+    const page1 = (await get(env, '/api/articles?lang=ka&limit=2')).body;
+    expect(page1.articles.map((a: any) => a.id)).toEqual(['k3', 'k2']);
+    expect((await get(env, `/api/articles?lang=ka&limit=2&before=${encodeURIComponent(page1.nextBefore)}`)).body.articles.map((a: any) => a.id)).toEqual(['k1', 'k0']);
+  });
+
+  it('GET /api/articles/:id supports lang, and 404s in Georgian without a finished translation', async () => {
+    const env = makeEnv();
+    seed(env);
+    expect((await get(env, '/api/articles/a1?lang=ka')).body.article.headline).toBe('ფედმა განაკვეთი არ შეცვალა');
+    expect((await get(env, '/api/articles/a1')).body.article.headline).toBe('Headline a1 goes here');
+    expect((await get(env, '/api/articles/a3?lang=ka')).status).toBe(404);
+    expect((await get(env, '/api/articles/a3')).status).toBe(200);
+  });
+
+  it('rejects unknown languages', async () => {
+    const env = makeEnv();
+    expect((await get(env, '/api/articles?lang=fr')).status).toBe(400);
+    expect((await get(env, '/api/articles/a1?lang=fr')).status).toBe(400);
+  });
+});
+
+describe('other endpoints', () => {
+  it('GET /api/slots counts published stories per 5-minute Tbilisi slot for a day', async () => {
+    const env = makeEnv();
+    pub(env, 's1', '2026-10-03T13:15:00.000Z'); // 17:15 -> slot 207
+    pub(env, 's2', '2026-10-03T13:19:59.000Z'); // 17:19 -> slot 207
+    pub(env, 's3', '2026-10-03T05:30:00.000Z', { category: 'Crypto' }); // 09:30 -> slot 114
+    pub(env, 's4', '2026-10-03T19:59:00.000Z'); // 23:59 -> slot 287
+    pub(env, 's5', '2026-10-03T20:00:00.000Z'); // 00:00 on 4 Oct -> other day
+    insertArticle(env, { id: 'hidden', status: 'rejected', fact_checked: 1, published_at: '2026-10-03T13:16:00.000Z' });
+
+    const day = await get(env, '/api/slots?date=2026-10-03');
+    expect(day.status).toBe(200);
+    expect(day.body).toEqual({ date: '2026-10-03', timezone: 'Asia/Tbilisi', slots: { '207': 2, '114': 1, '287': 1 } });
+    expect((await get(env, '/api/slots?date=2026-10-03&tab=crypto')).body.slots).toEqual({ '114': 1 });
+    expect((await get(env, '/api/slots?date=2026-10-04')).body.slots).toEqual({ '0': 1 });
+    expect((await get(env, '/api/slots?date=nope')).status).toBe(400);
+    expect((await get(env, '/api/slots?tab=zzz')).status).toBe(400);
+    expect((await get(env, '/api/slots')).status).toBe(200); // defaults to today in Tbilisi
+  });
+
+  it('GET /api/articles/:id returns the article with no trust payload', async () => {
+    const env = makeEnv();
+    pub(env, 'x1', '2026-10-03T10:00:00.000Z');
+    env.DB.raw.prepare(`INSERT INTO pipeline_events (article_id, stage, outcome, detail, created_at) VALUES ('x1','fact_check','ok',?, 'now')`).run(JSON.stringify({ breakdown: { credibility: 40 }, claims: { total: 3 }, independentSources: 2 }));
+    const r = await get(env, '/api/articles/x1');
+    expect(r.status).toBe(200);
+    expect(r.body.article.id).toBe('x1');
+    expect(r.body.trust).toBeUndefined();
+    expect(r.body.article).not.toHaveProperty('trust_score');
+    expect((await get(env, '/api/articles/missing')).status).toBe(404);
+    expect((await get(env, '/api/articles/bad%20id')).status).toBe(400);
+  });
+
+  it('GET /api/meta reports tabs, counts and the next cron slot', async () => {
+    const env = makeEnv();
+    pub(env, 'm1', '2026-10-03T10:00:00.000Z', { category: 'Crypto', georgia_related: 1 });
+    pub(env, 'm2', '2026-10-03T11:00:00.000Z', { category: 'Crypto' });
+    const { body } = await get(env, '/api/meta');
+    expect(body.counts).toMatchObject({ total: 2, georgia: 1 });
+    expect(body.counts.byCategory.Crypto).toBe(2);
+    expect(body.tabs.map((t: any) => t.label)).toEqual(['Top 10', 'All', 'Georgia Focus', 'AI & Tech', 'Economics', 'Crypto', 'Real Estate', 'Global Trade', 'Geopolitics', 'VC & Startups']);
+    expect(Date.parse(body.nextRunAt) % 300_000).toBe(0);
+    expect(Date.parse(body.nextRunAt)).toBeGreaterThan(Date.parse(body.now));
+    expect(body.lastPublishedAt).toBe('2026-10-03T11:00:00.000Z');
+    expect(body.lastRunAt).toBeNull();
+    expect(body.writing).toBe(false); // no Gemini key in this environment
+    expect((await get(makeEnv({ GEMINI_API_KEY: 'k' }), '/api/meta')).body.writing).toBe(true);
+    env.DB.raw.prepare(`INSERT INTO pipeline_runs (run_id, trigger, started_at, finished_at, status) VALUES ('r','cron','2026-10-03T13:15:00.000Z','2026-10-03T13:15:20.000Z','ok')`).run();
+    expect((await get(env, '/api/meta')).body.lastRunAt).toBe('2026-10-03T13:15:20.000Z');
+    // a run that yielded to another, and one found stopped halfway, do not make the site look live
+    const add = env.DB.raw.prepare(`INSERT INTO pipeline_runs (run_id, trigger, started_at, finished_at, status, stats) VALUES (?, 'cron', ?, ?, ?, ?)`);
+    add.run('skip', '2026-10-03T13:20:00.000Z', '2026-10-03T13:20:01.000Z', 'ok', JSON.stringify({ skipped: 'another run of the same stages is in progress' }));
+    add.run('dead', '2026-10-03T13:25:00.000Z', '2026-10-03T13:30:00.000Z', 'error', JSON.stringify({ error: 'run did not finish' }));
+    expect((await get(env, '/api/meta')).body.lastRunAt).toBe('2026-10-03T13:15:20.000Z');
+  });
+
+  it('GET /api/status exposes health without secrets', async () => {
+    const env = makeEnv({ GEMINI_API_KEY: 'sk-secret' });
+    insertArticle(env, { id: 'q', status: 'raw_research' });
+    const { body } = await get(env, '/api/status');
+    expect(body.llmConfigured).toBe(true);
+    expect(body.warnings).toEqual([]);
+    expect(body.articles).toEqual({ raw_research: 1 });
+    expect(JSON.stringify(body)).not.toContain('sk-secret');
+  });
+
+  it('GET /api/status says plainly when the Gemini key is missing', async () => {
+    const { body } = await get(makeEnv(), '/api/status');
+    expect(body.llmConfigured).toBe(false);
+    expect(body.warnings).toHaveLength(1);
+    expect(body.warnings[0]).toMatch(/GEMINI_API_KEY/);
+  });
+
+  it('GET /api/status shows the latest stage-level failure (so a retired model is visible without the admin key)', async () => {
+    const env = makeEnv({ GEMINI_API_KEY: 'sk-secret' });
+    expect((await get(env, '/api/status')).body.lastError).toBeNull();
+    const ev = env.DB.raw.prepare(`INSERT INTO pipeline_events (article_id, stage, outcome, detail, created_at) VALUES (?, ?, 'error', ?, ?)`);
+    const now = new Date().toISOString();
+    ev.run(null, 'feed', JSON.stringify({ error: 'HTTP 403' }), now); // feed failures are not stage failures
+    ev.run('a1', 'edit', JSON.stringify({ reason: 'facts_changed' }), now); // per-article retries are not either
+    ev.run(null, 'research', JSON.stringify({ error: 'Gemini 404: ' + 'x'.repeat(500) }), now);
+    const { body } = await get(env, '/api/status');
+    expect(body.lastError).toMatchObject({ stage: 'research' });
+    expect(body.lastError.message.startsWith('Gemini 404: ')).toBe(true);
+    expect(body.lastError.message.length).toBe(300);
+    expect(JSON.stringify(body)).not.toContain('sk-secret');
+  });
+
+  it('GET /api/admin/events needs the admin key and filters the audit trail', async () => {
+    const env = makeEnv({ ADMIN_KEY: 's3cret' });
+    const ev = env.DB.raw.prepare(`INSERT INTO pipeline_events (run_id, article_id, stage, outcome, detail, created_at) VALUES ('r', ?, ?, ?, ?, '2026-10-03T10:00:00.000Z')`);
+    ev.run('a1', 'ka_grammar', 'error', JSON.stringify({ reason: 'review_failed', problems: [{ field: 'headline', text: 'x', problem: 'y' }] }));
+    ev.run('a2', 'edit', 'ok', null);
+    const call = (path: string, headers: Record<string, string> = {}) => handleApi(new Request(`https://news.test${path}`, { headers }), env);
+    expect((await call('/api/admin/events')).status).toBe(401);
+    expect((await call('/api/admin/events', { 'x-admin-key': 'wrong' })).status).toBe(401);
+    const all = (await (await call('/api/admin/events', { 'x-admin-key': 's3cret' })).json()) as any;
+    expect(all.events.map((e: any) => e.stage)).toEqual(['edit', 'ka_grammar']); // newest first
+    const one = (await (await call('/api/admin/events?stage=ka_grammar&outcome=error&article=a1', { authorization: 'Bearer s3cret' })).json()) as any;
+    expect(one.events).toHaveLength(1);
+    expect(one.events[0].detail.problems[0].problem).toBe('y');
+    expect((await handleApi(new Request('https://news.test/api/admin/events'), makeEnv())).status).toBe(401); // disabled without a key
+  });
+
+  it('GET /api/admin/runs lists recent runs with their stats, and shows one that never finished', async () => {
+    const env = makeEnv({ ADMIN_KEY: 's3cret' });
+    const run = env.DB.raw.prepare(`INSERT INTO pipeline_runs (run_id, scope, trigger, started_at, finished_at, status, stats) VALUES (?, ?, 'cron', ?, ?, ?, ?)`);
+    run.run('r1', 'collect', '2026-10-03T10:00:00.000Z', '2026-10-03T10:00:03.000Z', 'ok', JSON.stringify({ collect: { polled: 23, searches: 3 } }));
+    run.run('r2', 'research+edit', '2026-10-03T10:01:00.000Z', null, 'running', null);
+    const call = (path: string, headers: Record<string, string> = {}) => handleApi(new Request(`https://news.test${path}`, { headers }), env);
+    expect((await call('/api/admin/runs')).status).toBe(401);
+    const all = (await (await call('/api/admin/runs', { 'x-admin-key': 's3cret' })).json()) as any;
+    expect(all.runs.map((r: any) => r.run_id)).toEqual(['r2', 'r1']);
+    expect(all.runs[1]).toMatchObject({ scope: 'collect', status: 'ok', ms: 3000, stats: { collect: { polled: 23, searches: 3 } } });
+    expect(all.runs[0]).toMatchObject({ status: 'running', ms: null, stats: null });
+    const one = (await (await call('/api/admin/runs?scope=collect&status=ok', { 'x-admin-key': 's3cret' })).json()) as any;
+    expect(one.runs.map((r: any) => r.run_id)).toEqual(['r1']);
+  });
+
+  it('POST /api/run requires the admin key (header or bearer), is disabled without one, and rejects GET', async () => {
+    const call = (env: Env, init: RequestInit, path = '/api/run/research') => handleApi(new Request(`https://news.test${path}`, init), env);
+    const off = makeEnv();
+    expect((await call(off, { method: 'POST', headers: { 'x-admin-key': 'anything' } })).status).toBe(401);
+
+    const env = makeEnv({ ADMIN_KEY: 's3cret' });
+    expect((await call(env, { method: 'POST' })).status).toBe(401);
+    expect((await call(env, { method: 'POST', headers: { 'x-admin-key': 'wrong' } })).status).toBe(401);
+    expect((await call(env, { method: 'POST', headers: { 'x-admin-key': 's3crett' } })).status).toBe(401);
+    expect((await call(env, { method: 'GET' })).status).toBe(405);
+    expect((await call(env, { method: 'POST', headers: { 'x-admin-key': 's3cret' } }, '/api/run/bogus')).status).toBe(404);
+
+    const ok = await call(env, { method: 'POST', headers: { authorization: 'Bearer s3cret' } }, '/api/run/edit');
+    expect(ok.status).toBe(200);
+    const body = (await ok.json()) as any;
+    expect(body.status).toBe('ok');
+    expect(body.stages.edit.skipped).toBeDefined();
+  });
+
+  it('unknown routes 404 as JSON', async () => {
+    const r = await get(makeEnv(), '/api/nope');
+    expect(r.status).toBe(404);
+    expect(r.body.error).toBe('not found');
+  });
+});
+
+describe('parseFigures', () => {
+  it('handles bullets, colons in values, and empty input', () => {
+    expect(parseFigures(null)).toEqual([]);
+    expect(parseFigures('')).toEqual([]);
+    expect(parseFigures('* Meeting: 28 Oct, 14:00')).toEqual([{ label: 'Meeting', value: '28 Oct, 14:00' }]);
+  });
+});
+
+const exec = (env: Env, sql: string, ...p: unknown[]) => (env.DB as unknown as { raw: { prepare(s: string): { run(...p: unknown[]): unknown } } }).raw.prepare(sql).run(...p);
+
+describe('GET /api/articles/:id: charts', () => {
+  const CHART = { title: 'Fed rate path', unit: '%', items: [{ label: 'Now', value: 4.25 }, { label: 'Target', value: 3.5 }] };
+  const KA_CHART = { title: 'ფედის განაკვეთი', unit: '%', items: [{ label: 'ახლა', value: 4.25 }, { label: 'მიზანი', value: 3.5 }] };
+
+  function seed(env: Env) {
+    pub(env, 'c1', '2026-10-03T10:00:00.000Z');
+    insertTranslation(env, 'c1');
+    exec(env, `INSERT INTO article_charts (article_id, lang, data, created_at) VALUES ('c1','en',?,'x'),('c1','ka',?,'x')`, JSON.stringify(CHART), JSON.stringify(KA_CHART));
+    const item = (id: string, url: string, at: string) =>
+      exec(env, `INSERT INTO feed_items (id, source_id, source_name, feed_id, title, url, published_at, fetched_at, article_id) VALUES (?,?,?,?,?,?,?,?, 'c1')`, id, 's', 's', 'f', 't', url, at, at);
+    item('i2', 'https://www.theblock.co/post/2', '2026-10-03T09:30:00.000Z');
+    item('i1', 'https://www.federalreserve.gov/x', '2026-10-03T08:00:00.000Z');
+    item('i3', 'javascript:alert(1)', '2026-10-03T07:00:00.000Z');
+    exec(env, `INSERT INTO feed_items (id, source_id, source_name, feed_id, title, url, published_at, fetched_at, article_id) VALUES ('other','s','s','f','t','https://www.reuters.com/o','2026-10-03T06:00:00.000Z','x','someone-else')`);
+  }
+
+  it('returns the charts in the requested language; a single chart stored before lists existed reads as a list of one', async () => {
+    const env = makeEnv();
+    seed(env);
+    // a chart stored before chart types existed reads as a bar chart
+    expect((await get(env, '/api/articles/c1?lang=en')).body.charts).toEqual([{ ...CHART, type: 'bar' }]);
+    expect((await get(env, '/api/articles/c1?lang=ka')).body.charts).toEqual([{ ...KA_CHART, type: 'bar' }]);
+  });
+
+  it('returns every stored chart of a story, in order, and skips one that is malformed', async () => {
+    const env = makeEnv();
+    pub(env, 'multi', '2026-10-03T10:00:00.000Z');
+    const donut = { type: 'donut', title: 'Reserves by currency', unit: '%', items: [{ label: 'USD', value: 58 }, { label: 'EUR', value: 20 }] };
+    const timeline = { type: 'timeline', title: 'Consultation', unit: '', items: [{ label: 'Opens', date: '2026-10-01' }, { label: 'Closes', date: '2026-12-31' }] };
+    exec(env, `INSERT INTO article_charts (article_id, lang, data, created_at) VALUES ('multi','en',?,'x')`, JSON.stringify([CHART, { type: 'nonsense' }, donut, timeline]));
+    const { body } = await get(env, '/api/articles/multi');
+    expect(body.charts.map((c: any) => c.type)).toEqual(['bar', 'donut', 'timeline']);
+  });
+
+  it('has no charts ([]) when none was stored, and ignores a stored chart that no longer parses', async () => {
+    const env = makeEnv();
+    pub(env, 'plain', '2026-10-03T10:00:00.000Z');
+    expect((await get(env, '/api/articles/plain')).body.charts).toEqual([]);
+    pub(env, 'broken', '2026-10-03T10:01:00.000Z');
+    exec(env, `INSERT INTO article_charts (article_id, lang, data, created_at) VALUES ('broken','en','{not json','x')`);
+    const r = await get(env, '/api/articles/broken');
+    expect(r.status).toBe(200);
+    expect(r.body.charts).toEqual([]);
+  });
+
+  it('no longer sends the reporting timeline: the page shows graphs of the story itself', async () => {
+    const env = makeEnv();
+    seed(env);
+    const { body } = await get(env, '/api/articles/c1');
+    expect(body).not.toHaveProperty('timeline');
+    expect(Object.keys(body).sort()).toEqual(['article', 'charts']);
+  });
+});
+
+describe('GET /api/articles?q= (text search)', () => {
+  it('matches headline or summary, case-insensitively, within the tab', async () => {
+    const env = makeEnv();
+    pub(env, 's1', '2026-10-03T10:00:00.000Z', { headline: 'Georgia raises its refinancing rate', category: 'Economics' });
+    pub(env, 's2', '2026-10-03T10:01:00.000Z', { headline: 'Chip startup raises funding', summary: 'The refinancing was led by an existing investor.', category: 'VC & Startups' });
+    pub(env, 's3', '2026-10-03T10:02:00.000Z', { headline: 'Bitcoin ETF flows', category: 'Crypto' });
+    const ids = async (q: string) => (await get(env, `/api/articles?${q}`)).body.articles.map((a: any) => a.id);
+    expect(await ids('q=REFINANCING')).toEqual(['s2', 's1']);
+    expect(await ids('q=refinancing&tab=economics')).toEqual(['s1']);
+    expect(await ids('q=nothing-like-this')).toEqual([]);
+  });
+
+  it('treats % and _ literally and rejects one-character searches', async () => {
+    const env = makeEnv();
+    pub(env, 'p1', '2026-10-03T10:00:00.000Z', { headline: 'Inflation hits 3.4% in September' });
+    pub(env, 'p2', '2026-10-03T10:01:00.000Z', { headline: 'Prices rise as demand grows' });
+    const ids = async (q: string) => (await get(env, `/api/articles?q=${encodeURIComponent(q)}`)).body.articles.map((a: any) => a.id);
+    expect(await ids('4%')).toEqual(['p1']);
+    expect(await ids('%%')).toEqual([]); // not a wildcard
+    expect(await ids('_ri')).toEqual([]);
+    expect((await get(env, '/api/articles?q=a')).status).toBe(400);
+  });
+
+  it('searches the Georgian text for lang=ka', async () => {
+    const env = makeEnv();
+    pub(env, 'k1', '2026-10-03T10:00:00.000Z', { headline: 'English only words' });
+    insertTranslation(env, 'k1', { headline: 'ეროვნული ბანკი ტოვებს განაკვეთს უცვლელად' });
+    const { body } = await get(env, `/api/articles?lang=ka&q=${encodeURIComponent('ბანკი')}`);
+    expect(body.articles.map((a: any) => a.id)).toEqual(['k1']);
+    expect((await get(env, '/api/articles?lang=ka&q=English')).body.articles).toEqual([]); // the English text is not searched in Georgian
+  });
+});
+
+describe('the site-wide numbers are gone', () => {
+  it('has no /api/stats: graphs live inside the stories', async () => {
+    expect((await get(makeEnv(), '/api/stats')).status).toBe(404);
+  });
+});
+
+describe('story pictures in the API', () => {
+  it('uses the source picture when there is one, and never a non-https one', async () => {
+    const env = makeEnv();
+    pub(env, 'p1', '2026-10-03T10:00:00.000Z');
+    pub(env, 'p2', '2026-10-03T11:00:00.000Z');
+    insertImage(env, 'p1', { url: 'https://cdn.example/p1.jpg', credit: 'Reuters', credit_url: 'https://www.reuters.com/a' });
+    insertImage(env, 'p2', { url: 'http://cdn.example/p2.jpg' }); // cannot happen through the pipeline, but the API still refuses it
+    const { body } = await get(env, '/api/articles');
+    const byId = Object.fromEntries(body.articles.map((a: any) => [a.id, a.image]));
+    expect(byId.p1).toEqual({ url: 'https://cdn.example/p1.jpg', credit: 'Reuters', credit_url: 'https://www.reuters.com/a', kind: 'source' });
+    expect(byId.p2.kind).toBe('stock');
+  });
+
+  it('is on the story page and in Georgian reads too', async () => {
+    const env = makeEnv();
+    pub(env, 'p3', '2026-10-03T10:00:00.000Z');
+    insertImage(env, 'p3', { url: 'https://cdn.example/p3.jpg' });
+    insertTranslation(env, 'p3');
+    expect((await get(env, '/api/articles/p3')).body.article.image.url).toBe('https://cdn.example/p3.jpg');
+    expect((await get(env, '/api/articles?lang=ka')).body.articles[0].image.url).toBe('https://cdn.example/p3.jpg');
+  });
+
+  it('stock photo choice follows the topic, uses the Georgia set for Georgian stories, and is stable', () => {
+    for (const [category, set] of [['AI & Tech', 'tech'], ['Economics', 'economy'], ['Crypto', 'crypto'], ['Real Estate', 'property'], ['Global Trade', 'trade'], ['Geopolitics', 'world'], ['VC & Startups', 'startups'], ['General', 'general'], ['Something new', 'general']] as const) {
+      expect(STOCK_PHOTOS[set]).toContainEqual(stockPhotoFor('x1', category, false));
+    }
+    expect(STOCK_PHOTOS.georgia).toContainEqual(stockPhotoFor('x1', 'Crypto', true));
+    expect(stockPhotoFor('x1', 'Crypto', false)).toBe(stockPhotoFor('x1', 'Crypto', false));
+    const seen = new Set(Array.from({ length: 60 }, (_, i) => stockPhotoFor(`id${i}`, 'Economics', false).url));
+    expect(seen.size).toBeGreaterThan(2); // spread across the set, not always the first photo
+  });
+
+  it('every stock photo is hotlinked from Wikimedia, has a credit, and carries a public licence', () => {
+    for (const [topic, photos] of Object.entries(STOCK_PHOTOS)) {
+      expect(photos.length, topic).toBeGreaterThanOrEqual(3);
+      for (const p of photos) {
+        expect(p.url, p.title).toMatch(/^https:\/\/thumb\.wikimedia\.org\/wikipedia\/commons\/thumb\//);
+        expect(p.page).toMatch(/^https:\/\/commons\.wikimedia\.org\/wiki\/File:/);
+        expect(p.license).toMatch(/^(CC0|Public domain|No restrictions)$/);
+        expect(p.author.length).toBeGreaterThan(0);
+      }
+    }
+    const urls = Object.values(STOCK_PHOTOS).flat().map((p) => p.url);
+    expect(new Set(urls).size).toBe(urls.length);
+  });
+});
