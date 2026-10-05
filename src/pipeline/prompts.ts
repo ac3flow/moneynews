@@ -28,10 +28,10 @@ Rules:
 - charts: one to three graphs that show the story's important facts, drawn beside the text; an empty list when the items state nothing a graph could show. Give each graph a DIFFERENT type and let each show a different part of the story (a comparison, a breakdown into parts, a trend, a deadline, progress against a target), so together they explain the story at a glance. Pick the types that fit what the items state:
   "bar": two to six comparable values in one unit (two companies, two periods);
   "line" or "area": three or more values over time, oldest first, labels are the periods;
-  "donut": two or more parts of one whole (shares);  "treemap": three or more parts, sized by value;
-  "funnel": three or more stages that only shrink;  "waterfall": a start value, then signed changes (negative numbers for decreases);
-  "gauge": one value on a scale, give "max" (or use unit "%");  "radial": one percentage;
-  "bullet": values against a target, every item has "target";  "radar": three or more metrics of one subject on the same scale;
+  "donut": two or more parts of one whole (shares); "treemap": three or more parts, sized by value;
+  "funnel": three or more stages that only shrink; "waterfall": a start value, then signed changes (negative numbers for decreases);
+  "gauge": one value on a scale, give "max" (or use unit "%"); "radial": one percentage;
+  "bullet": values against a target, every item has "target"; "radar": three or more metrics of one subject on the same scale;
   "timeline": two or more dated events or deadlines the items state (a launch, a consultation opening, a deadline, a decision date), oldest first; every item has "date" as YYYY-MM-DD and no "value", and the label says what happens that day ("Consultation opens", "Responses due").
   Form of one graph: {"type":"bar","title":"...","unit":"...","max":null,"items":[{"label":"...","value":<number>,"target":null}]}; for a timeline: {"type":"timeline","title":"...","unit":"","max":null,"items":[{"label":"...","date":"2026-12-31"}]}. Every value, target, max, date, and any number inside a label or title, must appear in the items exactly; never compute, estimate or round a figure, and never guess a date the items do not give. The title says what the graph shows ("Consultation timeline", "Share of reserves by currency"). Labels are short. A graph you are unsure of is better left out than guessed; two good graphs beat three weak ones.
 - importance: an integer from 0 to 100: how much this story matters to readers of a business, technology and Georgia news site, judged on its own. Weigh how many people, companies or markets it affects, how large the amounts or consequences are, whether it is a decision, ruling, deal or shock rather than routine commentary, and how new it is. Anchors: 90 and above moves global markets or affects millions (a central bank rate decision, major sanctions, a very large merger, a market crash); 70 to 89 is a major development with clear wide effects; 40 to 69 matters to a sector or a region; 20 to 39 is a routine update or incremental data; below 20 is minor or niche. Do not rate a story higher because it is well sourced.
@@ -127,12 +127,4 @@ Do not report matters of taste, and do not report Latin script used for names. I
 
 ${UNTRUSTED}
 
-export const FACTCHECK_PROMPT = `
-... წინა ტექსტი ...
-Return JSON: {"articles":[{"id":"1","ok":true,"problems":[{"field":"title","text":"..."}]}]}
-`;
-
-export const FACTCHECK_PROMPT = `
-... other prompt text ...
-Return JSON: {"articles":[{"id":"1","ok":true,"problems":[{"field":"title","text":"..."}]}]}
-`;
+Return JSON: {"articles":[{"id","ok":true,"problems":[{"field":"title","text":"..."}]}]}`;
