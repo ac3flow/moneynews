@@ -96,8 +96,17 @@ export const canReachThreshold = (ev: ClusterEval, threshold: number): boolean =
  * count too), so a heavily-sourced topic can never crowd out a thin one. `counts` is the number of
  * stories per lane in the last 24 hours (category counts, plus a separate 'Georgia' count).
  */
-export function pickClusters<T extends { items: FeedItemRow[]; ev: ClusterEval }>(candidates: T[], counts: Map<string, number>, n: number): T[] {
+export interface LaneQuota {
+  /** Most stories one lane may get in the current 5-minute slot. */
+  perLane: number;
+  /** Stories each lane already has in this slot (category names, plus 'Georgia'; clusters with no topic count as 'General'). */
+  slotCounts: Map<string, number>;
+}
+
+export function pickClusters<T extends { items: FeedItemRow[]; ev: ClusterEval }>(candidates: T[], counts: Map<string, number>, n: number, quota?: LaneQuota): T[] {
   const have = new Map(counts);
+  const room = (lane: string, takenNow: number): boolean => !quota || (quota.slotCounts.get(lane) ?? 0) + takenNow < quota.perLane;
+  const takenNow = new Map<string, number>();
   // Group eligible candidates by lane, best priority first within each lane.
   const byTopic = new Map<string, T[]>();
   const noTopic: T[] = [];
@@ -124,7 +133,7 @@ export function pickClusters<T extends { items: FeedItemRow[]; ev: ClusterEval }
     let bestCount = Infinity;
     for (const t of topics) {
       const arr = byTopic.get(t) ?? [];
-      if (!arr.length) continue;
+      if (!arr.length || !room(t, takenNow.get(t) ?? 0)) continue;
       const c = have.get(t) ?? 0;
       if (c < bestCount) {
         bestCount = c;
@@ -136,10 +145,12 @@ export function pickClusters<T extends { items: FeedItemRow[]; ev: ClusterEval }
       const choice = arr.shift() as T;
       picked.push(choice);
       have.set(bestTopic, (have.get(bestTopic) ?? 0) + 1);
+      takenNow.set(bestTopic, (takenNow.get(bestTopic) ?? 0) + 1);
       continue;
     }
-    if (noTopic.length) {
+    if (noTopic.length && room('General', takenNow.get('General') ?? 0)) {
       picked.push(noTopic.shift() as T);
+      takenNow.set('General', (takenNow.get('General') ?? 0) + 1);
       continue;
     }
     break; // nothing eligible left anywhere
@@ -321,6 +332,13 @@ export async function collectStage(ctx: StageCtx, phase = 0): Promise<Record<str
 export async function researchStage(ctx: StageCtx): Promise<Record<string, unknown>> {
   const { env, now, cfg } = ctx;
 
+  // With a daily Gemini budget, finish the stories already in the pipeline before drafting more: a draft that waits
+  // for its edit, fact-check and translation calls only uses up budget (and expires after a day if it never gets them).
+  if (ctx.budget) {
+    const backlog = await env.DB.prepare(`SELECT COUNT(*) AS n FROM articles WHERE status IN ('raw_research','edited')`).first<{ n: number }>();
+    if ((backlog?.n ?? 0) >= cfg.maxArticlesPerRun * 2) return { skipped: 'backlog: finishing the queued stories before drafting more', backlog: backlog?.n };
+  }
+
   // Clustering reads titles only, so the pool query leaves out the (long) snippets; the few items that
   // end up in a cluster get theirs in one more query below.
   const { results: pool } = await env.DB.prepare(
@@ -342,11 +360,22 @@ export async function researchStage(ctx: StageCtx): Promise<Record<string, unkno
   const counts = new Map(recent.map((r) => [r.category, r.n]));
   counts.set('Georgia', georgiaRecent?.n ?? 0);
 
+  // Per-topic quota (PER_TOPIC_PER_RUN): how many stories each topic already got in this 5-minute slot.
+  let quota: LaneQuota | undefined;
+  if (cfg.perTopicPerRun > 0) {
+    const slotStart = nowIso(Math.floor(now / SLOT_MS) * SLOT_MS);
+    const { results: inSlot } = await env.DB.prepare(`SELECT category, COUNT(*) AS n FROM articles WHERE created_at >= ?1 AND status != 'rejected' GROUP BY category`).bind(slotStart).all<{ category: string; n: number }>();
+    const inSlotGeorgia = await env.DB.prepare(`SELECT COUNT(*) AS n FROM articles WHERE created_at >= ?1 AND status != 'rejected' AND georgia_related = 1`).bind(slotStart).first<{ n: number }>();
+    const slotCounts = new Map(inSlot.map((r) => [r.category, r.n]));
+    slotCounts.set('Georgia', inSlotGeorgia?.n ?? 0);
+    quota = { perLane: cfg.perTopicPerRun, slotCounts };
+  }
+
   const eligible = clusterItems(pool)
     .map((items) => ({ items, ev: evaluateCluster(items, now) }))
     .filter((c) => c.ev.eligible && canReachThreshold(c.ev, cfg.publishThreshold))
     .sort((a, b) => b.ev.priority - a.ev.priority);
-  const clusters = pickClusters(eligible, counts, cfg.maxArticlesPerRun)
+  const clusters = pickClusters(eligible, counts, cfg.maxArticlesPerRun, quota)
     .map(
       (c, i): Candidate => ({
         cid: `c${i + 1}`,
