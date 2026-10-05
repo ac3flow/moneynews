@@ -337,13 +337,29 @@ async function slots(env: Env, sp: URLSearchParams): Promise<Response> {
 }
 
 // ─── GET /api/meta, /api/status ─────────────────────────────────────────────
+// Every open tab polls /api/meta, so it must stay cheap: D1's free plan allows 5 million row reads a day.
+// The per-category counts only change when a story is published, so they are kept for a few minutes per isolate
+// and refreshed as soon as the newest published time moves.
+const COUNTS_TTL_MS = 5 * 60_000;
+type CategoryCounts = { category: string; n: number; g: number }[];
+const countsCache = new WeakMap<D1Database, { key: string | null; at: number; rows: CategoryCounts }>();
+
+async function publishedCounts(env: Env, latest: string | null): Promise<CategoryCounts> {
+  const hit = countsCache.get(env.DB);
+  if (hit && hit.key === latest && Date.now() - hit.at < COUNTS_TTL_MS) return hit.rows;
+  const { results } = await env.DB.prepare(`SELECT category, COUNT(*) AS n, SUM(georgia_related) AS g FROM articles WHERE ${PUBLISHED} GROUP BY category`).all<{ category: string; n: number; g: number }>();
+  countsCache.set(env.DB, { key: latest, at: Date.now(), rows: results });
+  return results;
+}
+
 async function meta(env: Env): Promise<Response> {
-  const [counts, last, run] = await Promise.all([
-    env.DB.prepare(`SELECT category, COUNT(*) AS n, SUM(georgia_related) AS g FROM articles WHERE ${PUBLISHED} GROUP BY category`).all<{ category: string; n: number; g: number }>(),
+  const [last, run] = await Promise.all([
     env.DB.prepare(`SELECT MAX(published_at) AS t FROM articles WHERE ${PUBLISHED}`).first<{ t: string | null }>(),
     // A run that did its work. One that yielded to another run, or was found stopped halfway, says nothing about the site being live.
-    env.DB.prepare(`SELECT MAX(finished_at) AS t FROM pipeline_runs WHERE status = 'ok' AND finished_at IS NOT NULL AND COALESCE(stats, '') NOT LIKE '{"skipped"%'`).first<{ t: string | null }>(),
+    // Newest first through the started_at index, so it stops at the first match instead of reading every run ever logged.
+    env.DB.prepare(`SELECT finished_at AS t FROM pipeline_runs WHERE status = 'ok' AND finished_at IS NOT NULL AND COALESCE(stats, '') NOT LIKE '{"skipped"%' ORDER BY started_at DESC LIMIT 1`).first<{ t: string | null }>(),
   ]);
+  const counts = { results: await publishedCounts(env, last?.t ?? null) };
   const byCategory: Record<string, number> = Object.fromEntries(ARTICLE_CATEGORIES.map((c) => [c, 0]));
   let total = 0;
   let georgia = 0;
