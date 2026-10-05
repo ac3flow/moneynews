@@ -216,7 +216,7 @@ async function collect(ctx: StageCtx, scheduled: FeedRef[]): Promise<{ polled: n
   const pageFeedIds = batch.filter((f) => f.kind === 'page').map((f) => f.id);
   const known = new Set<string>();
   if (pageFeedIds.length) {
-    const { results } = await env.DB.prepare(`SELECT DISTINCT feed_id FROM feed_items WHERE feed_id IN (SELECT value FROM json_each(?1))`)
+    const { results } = await env.DB.prepare(`SELECT j.value AS feed_id FROM json_each(?1) j WHERE EXISTS (SELECT 1 FROM feed_items f WHERE f.feed_id = j.value)`)
       .bind(JSON.stringify(pageFeedIds))
       .all<{ feed_id: string }>();
     for (const r of results) known.add(r.feed_id);
@@ -349,7 +349,7 @@ export async function researchStage(ctx: StageCtx): Promise<Record<string, unkno
     .bind(MAX_OFFERS, nowIso(now - POOL_WINDOW_MS), POOL_LIMIT)
     .all<FeedItemRow>();
 
-  const { results: recent } = await env.DB.prepare(`SELECT category, COUNT(*) AS n FROM articles WHERE created_at >= ?1 AND status != 'rejected' GROUP BY category`)
+  const { results: recent } = await env.DB.prepare(`SELECT category, COUNT(*) AS n FROM articles WHERE created_at >= ?1 AND status != 'rejected' GROUP BY +category`)
     .bind(nowIso(now - 24 * 3600_000))
     .all<{ category: string; n: number }>();
   // Georgia gets its own round-robin lane (see roundRobinKey), so it needs its own count: how many
@@ -364,7 +364,7 @@ export async function researchStage(ctx: StageCtx): Promise<Record<string, unkno
   let quota: LaneQuota | undefined;
   if (cfg.perTopicPerRun > 0) {
     const slotStart = nowIso(Math.floor(now / SLOT_MS) * SLOT_MS);
-    const { results: inSlot } = await env.DB.prepare(`SELECT category, COUNT(*) AS n FROM articles WHERE created_at >= ?1 AND status != 'rejected' GROUP BY category`).bind(slotStart).all<{ category: string; n: number }>();
+    const { results: inSlot } = await env.DB.prepare(`SELECT category, COUNT(*) AS n FROM articles WHERE created_at >= ?1 AND status != 'rejected' GROUP BY +category`).bind(slotStart).all<{ category: string; n: number }>();
     const inSlotGeorgia = await env.DB.prepare(`SELECT COUNT(*) AS n FROM articles WHERE created_at >= ?1 AND status != 'rejected' AND georgia_related = 1`).bind(slotStart).first<{ n: number }>();
     const slotCounts = new Map(inSlot.map((r) => [r.category, r.n]));
     slotCounts.set('Georgia', inSlotGeorgia?.n ?? 0);

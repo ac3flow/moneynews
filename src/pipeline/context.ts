@@ -1,5 +1,6 @@
 import type { Env } from '../types';
 import { nowIso } from '../time';
+import type { Budget } from './budget';
 import type { Llm } from './llm';
 
 export interface PipelineConfig {
@@ -7,6 +8,8 @@ export interface PipelineConfig {
   webSearch: ReadonlySet<'bing' | 'gdelt'>;
   feedsPerRun: number;
   maxArticlesPerRun: number;
+  /** Up to this many new stories per topic in each 5-minute slot. 0 = off. */
+  perTopicPerRun: number;
   publishThreshold: number;
   mode: 'staged' | 'single';
 }
@@ -26,6 +29,7 @@ export function readConfig(env: Env): PipelineConfig {
     webSearch: searchProviders(env.WEB_SEARCH),
     feedsPerRun: int(env.FEEDS_PER_RUN, 10, 1, 400),
     maxArticlesPerRun: int(env.MAX_ARTICLES_PER_RUN, 3, 1, 10),
+    perTopicPerRun: int(env.PER_TOPIC_PER_RUN, 0, 0, 20),
     publishThreshold: int(env.PUBLISH_THRESHOLD, 60, 0, 100),
     mode: env.PIPELINE_MODE === 'single' ? 'single' : 'staged',
   };
@@ -48,6 +52,8 @@ export interface StageCtx {
   cfg: PipelineConfig;
   /** null when GEMINI_API_KEY is not configured. */
   llm: Llm | null;
+  /** Daily Gemini call budget; null when none is configured. */
+  budget?: Budget | null;
   events: PipelineEvent[];
 }
 

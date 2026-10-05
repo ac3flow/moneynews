@@ -68,7 +68,8 @@ const LANES = 9; // the eight topics plus the separate Georgia lane
 const cfg_repeats = (ctx: StageCtx): boolean => ctx.cfg.mode === 'single' && ctx.cfg.perTopicPerRun > 0;
 const maxPasses = (ctx: StageCtx): number => Math.min(10, Math.ceil((LANES * ctx.cfg.perTopicPerRun) / ctx.cfg.maxArticlesPerRun));
 const STALE_AFTER_MS = 24 * 3600_000; // unpublished drafts older than this are dropped as stale
-const LOG_RETENTION_MS = 30 * 86_400_000;
+const LOG_RETENTION_MS = 7 * 86_400_000;
+const PRUNE_CHUNK = 15_000; // rows per table per day: D1's free plan allows 100,000 row writes a day
 
 export interface RunOptions {
   trigger: 'cron' | 'manual';
@@ -212,8 +213,8 @@ async function housekeeping(env: Env, now: number): Promise<Record<string, unkno
   if (d.getUTCHours() === 0 && d.getUTCMinutes() < 5) {
     const cutoff = nowIso(now - LOG_RETENTION_MS);
     await env.DB.batch([
-      env.DB.prepare(`DELETE FROM pipeline_events WHERE created_at < ?1`).bind(cutoff),
-      env.DB.prepare(`DELETE FROM pipeline_runs WHERE started_at < ?1`).bind(cutoff),
+      env.DB.prepare(`DELETE FROM pipeline_events WHERE id IN (SELECT id FROM pipeline_events WHERE created_at < ?1 LIMIT ?2)`).bind(cutoff, PRUNE_CHUNK),
+      env.DB.prepare(`DELETE FROM pipeline_runs WHERE run_id IN (SELECT run_id FROM pipeline_runs WHERE started_at < ?1 LIMIT ?2)`).bind(cutoff, PRUNE_CHUNK),
     ]);
     out.pruned = true;
   }
