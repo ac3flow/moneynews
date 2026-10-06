@@ -1,0 +1,90 @@
+{
+  "name": "moneynews",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  "observability": { "enabled": true },
+  // Keep variables and secrets added in the Cloudflare dashboard when a deploy runs. Without this a deploy
+  // from this file replaces dashboard variables with the ones below, which can silently remove GEMINI_API_KEY.
+  "keep_vars": true,
+
+  // Static UI lives in ./public. The Worker only runs for /api/* (and cron).
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+
+  // On every `wrangler dev` / `wrangler deploy` (and every Cloudflare build): regenerate src/schema.ts from
+  // schema.sql and rebuild the Tailwind stylesheet. The Worker creates its own tables on first use.
+  "build": { "command": "npm run build" },
+
+  // WORKERS FREE (default): five triggers, one minute apart within each 20-minute cycle, each running
+  // one slice of the pipeline, so every invocation gets its own CPU / subrequest / D1-query budget.
+  //   :00 collect (poll sources)        :01 research + edit          :02 fact-check + translate (KA)
+  //   :03 Georgian grammar + publish    :04 collect (next sources)
+  // ...then nothing until :20, when the same five minutes repeat. An article drafted at :01 is
+  // published at :03 of the same cycle. These five expressions must match STAGED_CRONS in
+  // src/pipeline/run.ts, and SLOT_MS in src/time.ts must stay 20 minutes to match. Free accounts
+  // allow 5 cron triggers in total, so turn off the crons on the old ioane-agent and ioane-agent-2
+  // Workers first.
+  //
+  // Active hours (2026-10-05): the "4-19" hour field restricts every trigger to UTC 04:00-19:59,
+  // which is Tbilisi 08:00-23:59 (Georgia is a fixed UTC+4, no DST). Outside that window -- Tbilisi
+  // 00:00-08:00 -- Cloudflare simply never invokes the Worker on a schedule: no collect, no Gemini
+  // calls, nothing, not even a no-op. To go back to 24/7, drop "4-19" from each string (replace with
+  // "*"). To change the active window, change "4-19" (it's a UTC hour range, so shift it opposite to
+  // how you'd shift the Tbilisi range: Tbilisi start-4 to Tbilisi end-4, wrapping past midnight as
+  // needed).
+  //
+  // WORKERS PAID: use one trigger instead and set PIPELINE_MODE to "single" and FEEDS_PER_RUN to "280"
+  // so every source is searched every 5 minutes (still only during active hours if you keep "4-19"):
+  //   "triggers": { "crons": ["*/5 4-19 * * *"] }
+  "triggers": {
+    "crons": ["*/20 4-19 * * *", "1-59/20 4-19 * * *", "2-59/20 4-19 * * *", "3-59/20 4-19 * * *", "4-59/20 4-19 * * *"]
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ioane-news",
+      // Create it once:  npx wrangler d1 create ioane-news   then paste the id here.
+      "database_id": "944aa348-911c-4db4-9182-878f9c801456"
+    }
+  ],
+
+  "vars": {
+    // Same variable name agent 2 uses. Google retires old models for new accounts (gemini-2.5-flash
+    // already answers "no longer available to new users"), so check the current names at
+    // https://ai.google.dev/gemini-api/docs/models and change this line if the pipeline reports a 404.
+    "GEMINI_MODEL": "gemini-3.5-flash-lite",
+    // Flash-Lite is Google's cheapest tier: most requests per day and per minute, but the weakest at
+    // Georgian (it produced a non-word in a headline). The three Georgian steps (translate, grammar
+    // correction, proofreading) therefore use the larger model; everything else stays on Flash-Lite.
+    // Remove this line to put them back on GEMINI_MODEL, at the cost of Georgian quality.
+    "GEMINI_MODEL_KA": "gemini-3.8-flash",
+
+    "PIPELINE_MODE": "staged",    // "staged" (Free) or "single" (Paid)
+    // sources per collect: 14 -> ~20 groups of about 14. At the 20-minute cadence (2 collect ticks per
+    // cycle: collect + collect2) a full round-robin sweep of every feed takes ~20 groups / 2 * 20 min
+    // = ~3h20m, versus ~50 min before this cadence change. Raise this if feeds feel too stale, but
+    // Workers Free gives each invocation only ~10ms CPU, so a higher number risks a run timing out
+    // partway through (it still saves whatever groups it finished, nothing is lost, just slower).
+    "FEEDS_PER_RUN": "14",
+    "WEB_SEARCH": "bing,gdelt",   // open-web news search: "bing", "gdelt", both, or "off". Bing News is for personal, non-commercial use under its terms
+    // Raised 4 -> 6 (2026-10-05): lets a busy cycle draft/publish more stories at once, so thin
+    // topics (Real Estate, VC & Startups, Georgia) are less likely to get squeezed out by a single
+    // high-volume category in the same run.
+    "MAX_ARTICLES_PER_RUN": "6",
+    // Lowered 60 -> 50 (2026-10-05): raises how often a story actually clears the publish bar each
+    // cycle. Geopolitics/AI/Economics/Crypto still score well above this easily, so they're barely
+    // affected; the headroom mainly helps the single-specialist-source stories now allowed through by
+    // the research.ts eligibility change (Real Estate, VC & Startups, Georgia), which tend to score in
+    // the low 50s. Raise this back toward 60 if article quality feels too loose after a few days.
+    "PUBLISH_THRESHOLD": "50",
+    "SOURCE_PHOTOS": "all"        // story pictures: "all" = the one a source supplied (credited, hotlinked), "primary" = only from official sources, "off" = public-domain stock photos only
+  }
+
+  // Secrets (set with `wrangler secret put`, never put them in this file):
+  //   GEMINI_API_KEY   - same key agent 2 uses
+  //   ADMIN_KEY        - enables POST /api/run (manual pipeline trigger)
+}
