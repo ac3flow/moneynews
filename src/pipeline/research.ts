@@ -317,7 +317,7 @@ interface Candidate {
 
 /**
  * Collect: poll this tick's slice of the registry and add new items to the pool. No LLM.
- * In staged mode it runs twice per 5-minute slot (phase 0 at :00, phase 1 at :04), so the
+ * In staged mode it runs twice per cron slot (phase 0 at :00, phase 1 at :04), so the
  * counter advances by 2 per slot and every feed is still visited on a regular cycle.
  */
 export async function collectStage(ctx: StageCtx, phase = 0): Promise<Record<string, unknown>> {
