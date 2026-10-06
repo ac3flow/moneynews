@@ -8,7 +8,7 @@ export interface PipelineConfig {
   webSearch: ReadonlySet<'bing' | 'gdelt'>;
   feedsPerRun: number;
   maxArticlesPerRun: number;
-  /** Up to this many new stories per topic in each 5-minute slot. 0 = off. */
+  /** Up to this many new stories per topic in each cron slot (SLOT_MS wide). 0 = off. */
   perTopicPerRun: number;
   publishThreshold: number;
   mode: 'staged' | 'single';
