@@ -9,8 +9,10 @@
 // Two scheduling modes (PIPELINE_MODE):
 //   staged (default, fits Workers Free): five cron triggers, one slice of the pipeline each, so every
 //     invocation gets its own CPU, subrequest and D1-query budget. An article drafted at :01 is
-//     published at :03.
-//   single (Workers Paid): one trigger runs every stage in order, every five minutes.
+//     published at :03. The whole five-step cycle repeats every 20 minutes (see STAGED_CRONS),
+//     active only during Tbilisi 08:00-23:59 -- see wrangler.jsonc's triggers comment.
+//   single (Workers Paid): one trigger runs every stage in order, every five minutes (or whatever
+//     cadence/hours you set in wrangler.jsonc for that mode).
 
 import type { Env } from '../types';
 import { nowIso } from '../time';
@@ -45,13 +47,15 @@ export const STAGE_NAMES = Object.keys(STAGES) as StageName[];
 /** The full pipeline in order (used by the single trigger and by POST /api/run). */
 export const PIPELINE_ORDER: StageName[] = ['collect', 'research', 'edit', 'fact_check', 'translate', 'ka_grammar', 'publish'];
 
-/** Staged mode: cron expression -> stages. These five expressions must match wrangler.jsonc. */
+/** Staged mode: cron expression -> stages. These five expressions must match wrangler.jsonc.
+ * "4-19" restricts every one to UTC 04:00-19:59 (Tbilisi 08:00-23:59); outside that window
+ * Cloudflare never invokes the Worker on a schedule at all -- see wrangler.jsonc's comment. */
 export const STAGED_CRONS: Record<string, StageName[]> = {
-  '*/5 * * * *': ['collect'], //                 :00  poll sources
-  '1-59/5 * * * *': ['research', 'edit'], //     :01  draft + copy-edit
-  '2-59/5 * * * *': ['fact_check', 'translate'], // :02  verify, translate to Georgian
-  '3-59/5 * * * *': ['ka_grammar', 'publish'], //   :03  Georgian grammar check, publish
-  '4-59/5 * * * *': ['collect2'], //             :04  poll the next slice of sources
+  '*/20 4-19 * * *': ['collect'], //                 :00  poll sources
+  '1-59/20 4-19 * * *': ['research', 'edit'], //     :01  draft + copy-edit
+  '2-59/20 4-19 * * *': ['fact_check', 'translate'], // :02  verify, translate to Georgian
+  '3-59/20 4-19 * * *': ['ka_grammar', 'publish'], //   :03  Georgian grammar check, publish
+  '4-59/20 4-19 * * *': ['collect2'], //             :04  poll the next slice of sources
 };
 
 export function stagesForCron(mode: string | undefined, cron: string): StageName[] {
@@ -59,9 +63,11 @@ export function stagesForCron(mode: string | undefined, cron: string): StageName
   return STAGED_CRONS[cron] ?? PIPELINE_ORDER;
 }
 
-// A run of one scope starts every 5 minutes, so a 'running' row older than this is dead: the invocation was stopped
-// (CPU limit, restart) before it could finish. Keeping the window under the interval lets the next trigger take over.
-const LOCK_WINDOW_MS = 4 * 60_000;
+// A run of one scope starts every 20 minutes, so a 'running' row older than this is dead: the invocation was
+// stopped (CPU limit, restart) before it could finish. Keeping the window comfortably under the interval lets
+// the next trigger take over without waiting the full 20 minutes, while still giving a slow-but-alive run
+// plenty of headroom (a single invocation finishes in seconds in practice).
+const LOCK_WINDOW_MS = 15 * 60_000;
 // Repeating passes (PER_TOPIC_PER_RUN in single mode) must end well before the next 5-minute run starts.
 const PASS_BUDGET_MS = 3 * 60_000;
 const LANES = 9; // the eight topics plus the separate Georgia lane
