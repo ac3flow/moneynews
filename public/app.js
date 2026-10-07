@@ -1,9 +1,9 @@
-// Money News front end. No framework, no build step for JS. Hash routes:
+// Bulab.news front end. No framework, no build step for JS. Hash routes:
 //   #/                 front page        #/t/<tab>[?date=&time=]   a list (Top 10, All, Georgia, topics)
 //   #/s/<id>           one whole story   #/about                   how stories are made
 // All story text is written with textContent (never innerHTML): it is LLM-generated from web sources.
 
-import { bullets, donut, eventTimeline, funnel, gauge, hbars, kpiTiles, lineChart, radar, radialBars, treemap, waterfall } from './charts.js';
+import { bullets, columns, donut, eventTimeline, funnel, gantt, gauge, hbars, lineChart, network, parliament, pie, radar, radialBars, rose, slope, stackedRows, treemap, waffle, waterfall, wordCloud } from './charts.js';
 import { coverMarkup } from './covers.js';
 import { h, icon } from './dom.js';
 import { DEFAULT_LANG, LANGS, makeT, plural } from './i18n.js';
@@ -47,7 +47,7 @@ function pickLang() {
 
 const S = {
   lang: pickLang(),
-  theme: store.get('theme'), // 'light' | 'dark' | null (follow the system)
+  theme: store.get('theme'), // 'light' | 'dark' | null (dark, the brand look)
   tabs: FALLBACK_TABS,
   meta: null,
   skew: 0, // server clock minus local clock, ms
@@ -541,10 +541,10 @@ function datedEvents(items, aria) {
 }
 
 /**
- * A story with no chart of its own can still show its key figures side by side: two or more that
- * share a unit (percent, a currency, billions) become bars. Returns null when nothing compares.
+ * A story with too few graphs of its own still shows its key figures: two or more that share a unit (percent, a currency,
+ * billions) become bars, and a lone percentage becomes a gauge. Returns null when nothing can be drawn.
  */
-function figureBars(figures) {
+function figureGraph(figures) {
   const MONEY = /^(%|percent|პროცენტ|[$€£]|usd|eur|gel|dollars?|euros?|bn|mn|billion|million|trillion|მლრდ|მლნ|ტრლნ|დოლარ|ევრო|ლარ)/i;
   const groups = new Map();
   for (const f of figures) {
@@ -553,10 +553,50 @@ function figureBars(figures) {
     const num = Number(m[2].replace(/[\s,]/g, '').replace('−', '-'));
     const unit = `${m[1] ?? ''}${m[3]}`.toLowerCase().replace(/[\s.]+/g, '');
     if (!Number.isFinite(num) || !MONEY.test(unit)) continue;
-    groups.set(unit, [...(groups.get(unit) ?? []), { label: f.label, value: Math.abs(num), text: f.value }]);
+    groups.set(unit, [...(groups.get(unit) ?? []), { label: f.label, value: Math.abs(num), text: f.value, unit }]);
   }
   const best = [...groups.values()].sort((x, y) => y.length - x.length)[0];
-  return best && best.length >= 2 ? hbars(best.slice(0, 6)) : null;
+  if (best && best.length >= 2) return { title: t('vzFigures'), body: hbars(best.slice(0, 6)) };
+  const pct = [...groups.values()].flat().find((f) => /^(%|percent|პროცენტ)/i.test(f.unit) && f.value <= 100);
+  return pct ? { title: pct.label, body: gauge(pct.value, 100, { text: pct.text, aria: `${pct.label}: ${pct.text}` }) } : null;
+}
+
+const STOP_EN = new Set('the and for with from that this have has had been were was are will would could should may might not but its their they them his her our your you who what when how why can about into over under after before than then also more most such new says said say just now one two three per via off out get take make according report reports reported while which where there these those other some any each both being does did very still only'.split(' '));
+const STOP_KA = new Set('და რომ არის იყო იქნება ამ ეს ის იმ თუ კი ან არ მისი მათი მის მას ასევე შესახებ შემდეგ წინ წლის დღეს გუშინ ახალი ბოლო ყველა როგორც მაგრამ რადგან სადაც ჯერ უკვე კიდევ მხოლოდ აქვს აქვთ უნდა შეიძლება თუმცა რაც რასაც მიხედვით'.split(' '));
+
+/**
+ * The words a story is built around, from its own text: how often each is used (grouped by stem, so "bank" and "banks" count
+ * together), with the organisations and places it names kept whole and counted extra. Up to 16, weighted 1 to 5.
+ */
+function keyTerms(a) {
+  const text = [a.headline, a.summary, a.what_happened, a.why_it_matters, a.risks_uncertainty].join(' ');
+  const stems = new Map();
+  const bump = (key, form, n) => {
+    const e = stems.get(key) ?? { n: 0, forms: new Map() };
+    e.n += n;
+    e.forms.set(form, (e.forms.get(form) ?? 0) + n);
+    stems.set(key, e);
+  };
+  for (const w of text.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []) {
+    const low = w.toLowerCase();
+    const ka = /[\u10d0-\u10ff]/.test(low);
+    if (low.length < 4 || /^\d/.test(low) || (ka ? STOP_KA : STOP_EN).has(low)) continue;
+    bump(ka ? low.slice(0, 5) : low.replace(/(ies|es|s)$/, ''), low, 1);
+  }
+  const names = (a.affected_entities ?? []).filter((e) => e.length >= 3);
+  const inName = new Set(names.flatMap((e) => e.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? []));
+  const terms = [...stems.values()]
+    .map((e) => ({ text: [...e.forms].sort((x, y) => y[1] - x[1])[0][0], n: e.n }))
+    .filter((e) => !inName.has(e.text))
+    .concat(names.map((e) => ({ text: e, n: 3 + (text.toLowerCase().split(e.toLowerCase()).length - 1) })));
+  const top = terms.sort((x, y) => y.n - x.n).slice(0, 16);
+  if (top.length < 6) return [];
+  const max = top[0].n;
+  const sized = top.map((e) => ({ text: e.text, w: e.n / max >= 0.8 ? 5 : e.n / max >= 0.55 ? 4 : e.n / max >= 0.35 ? 3 : e.n / max >= 0.2 ? 2 : 1 }));
+  // the biggest words in the middle, the smaller ones around them
+  const ordered = [];
+  sized.forEach((e, i) => (i % 2 === 0 ? ordered.push(e) : ordered.unshift(e)));
+  return ordered;
 }
 
 /** One chart from the optional, source-checked spec the Research agent proposed (bar when the type is missing). */
@@ -589,6 +629,30 @@ function specChart(c) {
       return bullets(items.map((i) => ({ label: i.label, value: i.value, target: i.target, text: val(i.value), targetText: t('targetN', { n: val(i.target) }) })));
     case 'timeline':
       return datedEvents(items, aria);
+    case 'column':
+      return columns({ labels: items.map((i) => i.label), series: [{ name: c.title, values }], fmt: (n) => compact(n, Math.max(...values)), aria });
+    case 'grouped':
+    case 'stacked': {
+      const names = c.series ?? [];
+      if (c.type === 'stacked') return stackedRows({ rows: items.map((i) => ({ label: i.label, parts: i.values ?? [] })), names, fmt: (n) => val(n), aria });
+      return columns({ labels: items.map((i) => i.label), series: names.map((name, k) => ({ name, values: items.map((i) => i.values?.[k] ?? 0) })), fmt: (n) => compact(n, Math.max(...items.flatMap((i) => i.values ?? [0]))), aria });
+    }
+    case 'slope':
+      return slope(items.map((i) => ({ label: i.label, a: i.value, b: i.to ?? i.value, aText: val(i.value), bText: val(i.to ?? i.value) })), { from: c.series?.[0] ?? '', to: c.series?.[1] ?? '', aria });
+    case 'gantt': {
+      const sameYear = new Set(items.flatMap((i) => [i.date.slice(0, 4), i.end.slice(0, 4)])).size === 1;
+      return gantt(items.map((i) => ({ label: i.label, start: dayNumber(i.date), end: dayNumber(i.end), range: `${dateLabel(i.date, { year: !sameYear })} – ${dateLabel(i.end)}` })), { today: dayNumber(todayTb()), todayLabel: t('tlToday'), aria });
+    }
+    case 'network':
+      return network({ nodes: items.map((i) => ({ label: i.label })), links: c.links ?? [], aria });
+    case 'pie':
+      return pie(items.map((i) => ({ label: i.label, n: Math.max(0, i.value), text: val(i.value) })), { aria });
+    case 'waffle':
+      return waffle(items[0].value, { text: val(items[0].value), label: items[0].label, aria });
+    case 'rose':
+      return rose(items.map((i) => ({ label: i.label, n: Math.max(0, i.value), text: val(i.value) })), { aria });
+    case 'parliament':
+      return parliament(items.map((i) => ({ label: i.label, n: i.value, text: String(i.value) })), { center: String(values.reduce((t, v) => t + v, 0)), aria });
     case 'radar':
       return radar(items.map((i) => ({ label: i.label, value: i.value, text: val(i.value) })), { max: c.max ?? (c.unit === '%' ? 100 : Math.max(...values) * 1.1), aria });
     default:
@@ -596,29 +660,23 @@ function specChart(c) {
   }
 }
 
-/** Graph types that need the full width of the story column: a time axis, many labelled bars, or tiles that shrink badly. */
-const WIDE_GRAPHS = new Set(['timeline', 'line', 'area', 'waterfall', 'treemap']);
-
 /**
- * The story told in graphs, inside the story itself: its key numbers, then up to three source-checked graphs of different types
- * (each one describes a part of this story), or, when the story has none, its comparable figures as bars. Null when nothing can be drawn.
- * Narrow graphs sit two to a row; if one is left over it takes the whole row, so the grid never has a hole.
+ * The story told in graphs: up to three source-checked graphs of different types, each describing a part of this story. A story
+ * with fewer than two gets its key figures drawn (bars, or a gauge for one percentage) and a cloud of its key words, so every
+ * story has real graphs. Goes under "About this story".
  */
 function storyGraphs(a, data) {
-  const tiles = (a.figures ?? []).filter((f) => f.label && /\d/.test(f.value) && f.value.length <= 18).slice(0, 4);
-  const charts = data.charts ?? [];
-  const compared = charts.length ? null : figureBars(a.figures ?? []);
-  const items = [...charts.map((c) => ({ title: c.title, body: specChart(c), wide: WIDE_GRAPHS.has(c.type) })), ...(compared ? [{ title: t('vzFigures'), body: compared, wide: true }] : [])];
-  const narrow = items.filter((i) => !i.wide);
-  if (narrow.length % 2 === 1) narrow.at(-1).wide = true;
-  if (!tiles.length && !items.length) return null;
-  return h(
-    'section',
-    { class: 'story-graphs', 'aria-labelledby': 'viz-h' },
-    h('h2', { id: 'viz-h', class: 'h-sm', text: t('vizTitle') }),
-    tiles.length ? h('div', { class: 'graph-tiles' }, h('p', { class: 'viz-title', text: t('vizKey') }), kpiTiles(tiles.map((f) => ({ label: f.label, value: f.value })))) : null,
-    items.length ? h('div', { class: 'graph-grid' }, items.map((i) => h('figure', { class: `graph-card${i.wide ? ' wide' : ''}` }, h('figcaption', { text: i.title }), i.body))) : null,
-  );
+  const items = (data.charts ?? []).map((c) => ({ title: c.title, body: specChart(c) }));
+  if (items.length < 2) {
+    const figures = figureGraph(a.figures ?? []);
+    if (figures) items.push(figures);
+  }
+  if (items.length < 2) {
+    const terms = keyTerms(a);
+    if (terms.length) items.push({ title: t('vzTerms'), body: wordCloud(terms, { aria: t('vzTerms') }) });
+  }
+  if (!items.length) return null;
+  return h('section', { class: 'panel panel-pad art-viz', 'aria-labelledby': 'viz-h' }, h('h2', { id: 'viz-h', class: 'h-sm', text: t('vizTitle') }), items.map((i) => h('figure', { class: 'graph-block' }, h('figcaption', { text: i.title }), i.body)));
 }
 
 async function viewStory(r) {
@@ -655,7 +713,6 @@ async function viewStory(r) {
     'div',
     { class: 'panel read-panel' },
     h('section', {}, h('h2', { class: 'h-md', text: t('secWhat') }), h('div', { class: 'prose sp-top' }, paras.map((p) => h('p', { text: tx(p) })))),
-    storyGraphs(a, data),
     h('section', { class: 'sumbox', 'aria-labelledby': 'why-h' }, h('h2', { id: 'why-h', text: t('secWhy') }), h('p', { text: tx(a.why_it_matters) })),
     a.figures.length
       ? h('section', { class: 'block' }, h('h2', { class: 'h-sm', text: t('secFigures') }), h('ul', { class: 'fig-list' }, a.figures.map((f) => (f.label ? h('li', {}, h('span', { text: f.label }), h('b', { text: f.value })) : h('li', { class: 'plain' }, h('b', { text: f.value }))))))
@@ -716,7 +773,7 @@ async function viewStory(r) {
     ),
   );
 
-  return [h('div', { class: 'progress', 'aria-hidden': 'true' }, h('i', { id: 'prog' })), h('article', {}, hero, shell(h('div', { class: 'art-wrap' }, h('div', { class: 'art-grid' }, read, h('div', { class: 'art-side' }, about)))))];
+  return [h('div', { class: 'progress', 'aria-hidden': 'true' }, h('i', { id: 'prog' })), h('article', {}, hero, shell(h('div', { class: 'art-wrap' }, h('div', { class: 'art-grid' }, read, h('div', { class: 'art-side' }, about, storyGraphs(a, data))))))];
 }
 
 function viewAbout() {
@@ -746,7 +803,7 @@ function viewNotFound() {
 
 // ─── chrome: header, nav, footer ────────────────────────────────────────────
 function wordmark(extra = {}) {
-  return h('a', { class: 'wordmark', href: '#/', ...extra }, h('b', { text: 'MONEY' }), h('span', { text: '.News' }));
+  return h('a', { class: 'wordmark', href: '#/', ...extra }, h('b', { text: 'BULAB' }), h('span', { text: '.news' }));
 }
 
 function renderHeader() {
@@ -809,7 +866,7 @@ function renderFooter() {
 }
 
 // ─── theme and language ─────────────────────────────────────────────────────
-const isDark = () => (S.theme ? S.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches);
+const isDark = () => S.theme !== 'light'; // dark is the brand look; light only when the reader picks it
 function applyTheme() {
   if (S.theme) document.documentElement.setAttribute('data-theme', S.theme);
   else document.documentElement.removeAttribute('data-theme');

@@ -1,4 +1,4 @@
-# Deploy Money News
+# Deploy Bulab.news
 
 **Where it runs: Cloudflare Workers.** After deploying, the site is at `https://moneynews.<your-subdomain>.workers.dev`. The Worker is named `moneynews` in `wrangler.jsonc`, so it must have the same name in Cloudflare. The commands below use `moneynews.ac3flow33.workers.dev`; swap in yours. You do not need any other host.
 

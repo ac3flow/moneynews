@@ -19,16 +19,16 @@ function rng(seed) {
   };
 }
 
-// [dark, light] gradient stops, all in the green-teal family
+// [dark, light] gradient stops: deep navy into the brand accents (emerald, violet, amber, teal, sky)
 const HUE = {
-  ai: ['#032b22', '#12a47a'],
-  econ: ['#04261f', '#0e8f68'],
-  crypto: ['#06231f', '#1db8a0'],
-  re: ['#052920', '#1a9d82'],
-  trade: ['#032a2b', '#0f9ba0'],
-  startup: ['#0b2b18', '#4cbf6b'],
-  geo: ['#042a24', '#1c9c8c'],
-  fin: ['#052b21', '#17a67d'],
+  ai: ['#0a1330', '#7c5cdb'],
+  econ: ['#06182a', '#10a878'],
+  crypto: ['#17120a', '#d99a1f'],
+  re: ['#081a2a', '#14a89a'],
+  trade: ['#07182f', '#2f9fd6'],
+  startup: ['#0a1a1a', '#34c98f'],
+  geo: ['#140f2a', '#8f74e0'],
+  fin: ['#081528', '#10a878'],
 };
 
 export const MOTIF_OF = {
