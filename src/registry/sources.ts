@@ -1,5 +1,4 @@
-
-  // Comprehensive source registry + trust hierarchy.
+// Comprehensive source registry + trust hierarchy.
 //
 // Weights (0–5), from the product spec:
 //   5.0  Primary & official  central banks, statistical offices, regulators, ministries, academic journals
@@ -179,19 +178,23 @@ const DEFS: Def[] = [
   ['Google Scholar', C, 'scholar.google.com'],
 
   // Education
-  ['Times Higher Education', S, 'timeshighereducation.com'],
+  ['Times Higher Education', S, 'timeshighereducation.com', { feeds: [rss('https://www.timeshighereducation.com/feed', 'education')] }],
   ['Inside Higher Ed', S, 'insidehighered.com', { feeds: [rss('https://www.insidehighered.com/rss.xml', 'education')] }], // (v)
   ['EdSurge', S, 'edsurge.com', { feeds: [rss('https://www.edsurge.com/articles_rss', 'education')] }], // (v)
-  ['Education Week', S, 'edweek.org'],
-  ['Chronicle of Higher Ed', S, 'chronicle.com'],
+  ['Education Week', S, 'edweek.org', { feeds: [rss('https://www.edweek.org/feed', 'education')] }],
+  ['Chronicle of Higher Ed', S, 'chronicle.com', { feeds: [rss('https://www.chronicle.com/feed', 'education')] }],
+  ['University World News', S, 'universityworldnews.com', { feeds: [rss('https://www.universityworldnews.com/rss.php', 'education')] }],
+  ['eSchool News', S, 'eschoolnews.com', { feeds: [rss('https://www.eschoolnews.com/feed/', 'education')] }],
+  ['The PIE News', S, 'thepienews.com', { feeds: [rss('https://thepienews.com/feed/', 'education')] }],
+  ['EdTech Magazine', S, 'edtechmagazine.com', { feeds: [rss('https://edtechmagazine.com/higher/rss.xml', 'education')] }],
   ['UNESCO', P, 'unesco.org'],
   ['OECD', P, 'oecd.org', { aliases: ['OECD Education', 'OECD Housing', 'OECD Trade'] }],
   ['World Bank', P, 'worldbank.org', { aliases: ['World Bank Education', 'World Bank Urban', 'World Bank Trade'] }],
   ['UNICEF Education', P, 'unicef.org'],
   ['US Dept of Ed', P, 'ed.gov'],
   ['EU Commission Education', P, 'education.ec.europa.eu'],
-  ['Brookings', M, 'brookings.edu'],
-  ['HBS Working Knowledge', S, 'hbswk.hbs.edu'],
+  ['Brookings', M, 'brookings.edu', { feeds: [rss('https://www.brookings.edu/feed/', 'education')] }],
+  ['HBS Working Knowledge', S, 'hbswk.hbs.edu', { feeds: [rss('https://hbswk.hbs.edu/rss/rss.aspx', 'education')] }],
   ['Stanford GSB Insights', S, 'gsb.stanford.edu', { aliases: ['Stanford GSB'] }],
   ['MIT Sloan', S, 'mitsloan.mit.edu', { aliases: ['MIT Sloan Management Review'] }],
 
@@ -300,8 +303,13 @@ const DEFS: Def[] = [
   // Banks & financial institutions
   ['FSB', P, 'fsb.org', { feeds: [rss('https://www.fsb.org/feed/', 'banks')] }], // (v)
   ['EBA', P, 'eba.europa.eu', { feeds: [rss('https://www.eba.europa.eu/rss.xml', 'banks')] }], // (v)
-  ['OCC', P, 'occ.gov occ.treas.gov'],
-  ['FDIC', P, 'fdic.gov'],
+  ['OCC', P, 'occ.gov occ.treas.gov', { feeds: [rss('https://www.occ.gov/news-issuances/news-releases/rss.xml', 'banks')] }],
+  ['FDIC', P, 'fdic.gov', { feeds: [rss('https://www.fdic.gov/news/news/press/pressreleases.xml', 'banks')] }],
+  ['IIF', S, 'iif.com', { feeds: [rss('https://www.iif.com/rss', 'banks')] }],
+  ['Global Capital', S, 'globalcapital.com', { feeds: [rss('https://www.globalcapital.com/rss', 'banks')] }],
+  ['Central Banking', S, 'centralbanking.com', { feeds: [rss('https://www.centralbanking.com/feed', 'banks')] }],
+  ['Bank Director', S, 'bankdirector.com', { feeds: [rss('https://www.bankdirector.com/feed/', 'banks')] }],
+  ['Payments Dive', S, 'paymentsdive.com', { feeds: [rss('https://www.paymentsdive.com/feeds/news/', 'banks')] }],
   ['American Banker', S, 'americanbanker.com'],
   ['The Banker', S, 'thebanker.com'],
   ['Risk.net', S, 'risk.net'],
@@ -330,19 +338,20 @@ const DEFS: Def[] = [
 
   // Management & leadership
   ['Bain Insights', C, 'bain.com'],
-  ['BCG', C, 'bcg.com'],
+  ['BCG', C, 'bcg.com', { feeds: [rss('https://www.bcg.com/rss', 'management')] }],
   ['Deloitte Insights', C, 'deloitte.com'],
   ['PwC Insights', C, 'pwc.com'],
   ['Accenture Research', C, 'accenture.com'],
-  ['SHRM', S, 'shrm.org'],
+  ['SHRM', S, 'shrm.org', { feeds: [rss('https://www.shrm.org/rss/Pages/TopStories.aspx', 'management')] }],
   ['LBS Review', S, 'london.edu'],
-  ['INSEAD Knowledge', S, 'insead.edu'],
-  ['Wharton Knowledge', S, 'knowledge.wharton.upenn.edu wharton.upenn.edu'],
-  ['Strategy+Business', C, 'strategy-business.com'],
-  ['Chief Executive', N, 'chiefexecutive.net'],
+  ['INSEAD Knowledge', S, 'insead.edu', { feeds: [rss('https://knowledge.insead.edu/rss.xml', 'management')] }],
+  ['Wharton Knowledge', S, 'knowledge.wharton.upenn.edu wharton.upenn.edu', { feeds: [rss('https://knowledge.wharton.upenn.edu/feed/', 'management')] }],
+  ['Strategy+Business', C, 'strategy-business.com', { feeds: [rss('https://www.strategy-business.com/rss.xml', 'management')] }],
+  ['Chief Executive', N, 'chiefexecutive.net', { feeds: [rss('https://chiefexecutive.net/feed/', 'management')] }],
+  ['MIT Sloan Management Review', S, 'sloanreview.mit.edu', { feeds: [rss('https://sloanreview.mit.edu/feed/', 'management')] }],
   ['Fast Company', C, 'fastcompany.com', { feeds: [rss('https://www.fastcompany.com/section/innovation/rss', 'startups')] }], // (v)
-  ['Inc.', C, 'inc.com'],
-  ['Entrepreneur', N, 'entrepreneur.com'],
+  ['Inc.', C, 'inc.com', { feeds: [rss('https://www.inc.com/rss', 'management')] }],
+  ['Entrepreneur', N, 'entrepreneur.com', { feeds: [rss('https://www.entrepreneur.com/latest.rss', 'management')] }],
   ['Seeking Alpha', N, 'seekingalpha.com'],
 
   // ── Added from the owner's source list (October 2026) ──────────────────────────────────────────────
