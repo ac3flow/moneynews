@@ -4,9 +4,11 @@ export const SCHEMA_STATEMENTS: string[] = [
   "CREATE INDEX IF NOT EXISTS idx_status_published ON articles(status, published_at DESC)",
   "CREATE INDEX IF NOT EXISTS idx_trust_score ON articles(trust_score DESC)",
   "CREATE INDEX IF NOT EXISTS idx_category ON articles(category)",
+  "CREATE INDEX IF NOT EXISTS idx_articles_created ON articles(created_at, status, category, georgia_related)",
   "CREATE TABLE IF NOT EXISTS feed_items ( id TEXT PRIMARY KEY, source_id TEXT NOT NULL, source_name TEXT NOT NULL, feed_id TEXT NOT NULL, title TEXT NOT NULL, url TEXT NOT NULL, snippet TEXT, published_at TEXT NOT NULL, fetched_at TEXT NOT NULL, via_social INTEGER DEFAULT 0, georgia INTEGER DEFAULT 0, category_hint TEXT, offered_count INTEGER DEFAULT 0, article_id TEXT )",
   "CREATE INDEX IF NOT EXISTS idx_feed_items_pool ON feed_items(article_id, published_at DESC)",
   "CREATE INDEX IF NOT EXISTS idx_feed_items_fetched ON feed_items(fetched_at)",
+  "CREATE INDEX IF NOT EXISTS idx_feed_items_feed ON feed_items(feed_id)",
   "CREATE TABLE IF NOT EXISTS article_translations ( article_id TEXT NOT NULL, lang TEXT NOT NULL, headline TEXT NOT NULL, summary TEXT NOT NULL, what_happened TEXT NOT NULL, why_it_matters TEXT NOT NULL, figures_dates TEXT, affected_entities TEXT, risks_uncertainty TEXT, grammar_checked INTEGER DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (article_id, lang) )",
   "CREATE INDEX IF NOT EXISTS idx_translations_pending ON article_translations(lang, grammar_checked, created_at)",
   "CREATE TABLE IF NOT EXISTS article_charts ( article_id TEXT NOT NULL, lang TEXT NOT NULL, data TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (article_id, lang) )",
@@ -15,7 +17,9 @@ export const SCHEMA_STATEMENTS: string[] = [
   "CREATE TABLE IF NOT EXISTS article_importance ( article_id TEXT PRIMARY KEY, score INTEGER NOT NULL, llm INTEGER NOT NULL, publishers INTEGER NOT NULL, created_at TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS pipeline_runs ( run_id TEXT PRIMARY KEY, scope TEXT NOT NULL DEFAULT 'all', trigger TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL, stats TEXT )",
   "CREATE INDEX IF NOT EXISTS idx_runs_started ON pipeline_runs(started_at DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_runs_status ON pipeline_runs(status, started_at)",
   "CREATE TABLE IF NOT EXISTS pipeline_events ( id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT, article_id TEXT, stage TEXT NOT NULL, outcome TEXT NOT NULL, detail TEXT, created_at TEXT NOT NULL )",
   "CREATE INDEX IF NOT EXISTS idx_events_article ON pipeline_events(article_id, id DESC)",
-  "CREATE INDEX IF NOT EXISTS idx_events_stage ON pipeline_events(stage, id DESC)"
+  "CREATE INDEX IF NOT EXISTS idx_events_stage ON pipeline_events(stage, id DESC)",
+  "CREATE TABLE IF NOT EXISTS llm_usage ( day TEXT NOT NULL, model TEXT NOT NULL, calls INTEGER NOT NULL DEFAULT 0, prompt_tokens INTEGER NOT NULL DEFAULT 0, completion_tokens INTEGER NOT NULL DEFAULT 0, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (day, model) )"
 ];

@@ -3,12 +3,13 @@ import { resolveSource } from './registry/trust';
 import { ensureSchema } from './db-init';
 import { PIPELINE_ORDER, STAGE_NAMES, runPipeline, type StageName } from './pipeline/run';
 import { parseLinks } from './pipeline/citations';
+import { quotaDay } from './pipeline/budget';
 import { SLOT_MS, TBILISI_OFFSET_MIN, TIMEZONE, dayRangeUtc, formatSlot, isDate, nextSlot, nowIso, parseSlotMinute, slotRangeUtc, tbilisiDate } from './time';
 import { parseCharts } from './pipeline/schemas';
 import { stockPhotoFor } from './stock-photos';
 import { IMPORTANCE_DECAY_PER_HOUR, fallbackImportance } from './pipeline/importance';
 import { ARTICLE_CATEGORIES, type ArticleRow, type Env } from './types';
-
+import { AI_TECH_SOURCES, AI_TECH_CATEGORIES, sourcesByCategory, sourcesByTag, featuredSources, searchSources, countsByCategory, type AiTechCategoryId } from './registry/ai-tech-directory';
 // ─── tabs ───────────────────────────────────────────────────────────────────
 export const TABS = [
   { id: 'top10', label: 'Top 10' },
@@ -336,13 +337,29 @@ async function slots(env: Env, sp: URLSearchParams): Promise<Response> {
 }
 
 // ─── GET /api/meta, /api/status ─────────────────────────────────────────────
+// Every open tab polls /api/meta, so it must stay cheap: D1's free plan allows 5 million row reads a day.
+// The per-category counts only change when a story is published, so they are kept for a few minutes per isolate
+// and refreshed as soon as the newest published time moves.
+const COUNTS_TTL_MS = 5 * 60_000;
+type CategoryCounts = { category: string; n: number; g: number }[];
+const countsCache = new WeakMap<D1Database, { key: string | null; at: number; rows: CategoryCounts }>();
+
+async function publishedCounts(env: Env, latest: string | null): Promise<CategoryCounts> {
+  const hit = countsCache.get(env.DB);
+  if (hit && hit.key === latest && Date.now() - hit.at < COUNTS_TTL_MS) return hit.rows;
+  const { results } = await env.DB.prepare(`SELECT category, COUNT(*) AS n, SUM(georgia_related) AS g FROM articles WHERE ${PUBLISHED} GROUP BY category`).all<{ category: string; n: number; g: number }>();
+  countsCache.set(env.DB, { key: latest, at: Date.now(), rows: results });
+  return results;
+}
+
 async function meta(env: Env): Promise<Response> {
-  const [counts, last, run] = await Promise.all([
-    env.DB.prepare(`SELECT category, COUNT(*) AS n, SUM(georgia_related) AS g FROM articles WHERE ${PUBLISHED} GROUP BY category`).all<{ category: string; n: number; g: number }>(),
+  const [last, run] = await Promise.all([
     env.DB.prepare(`SELECT MAX(published_at) AS t FROM articles WHERE ${PUBLISHED}`).first<{ t: string | null }>(),
     // A run that did its work. One that yielded to another run, or was found stopped halfway, says nothing about the site being live.
-    env.DB.prepare(`SELECT MAX(finished_at) AS t FROM pipeline_runs WHERE status = 'ok' AND finished_at IS NOT NULL AND COALESCE(stats, '') NOT LIKE '{"skipped"%'`).first<{ t: string | null }>(),
+    // Newest first through the started_at index, so it stops at the first match instead of reading every run ever logged.
+    env.DB.prepare(`SELECT finished_at AS t FROM pipeline_runs WHERE status = 'ok' AND finished_at IS NOT NULL AND COALESCE(stats, '') NOT LIKE '{"skipped"%' ORDER BY started_at DESC LIMIT 1`).first<{ t: string | null }>(),
   ]);
+  const counts = { results: await publishedCounts(env, last?.t ?? null) };
   const byCategory: Record<string, number> = Object.fromEntries(ARTICLE_CATEGORIES.map((c) => [c, 0]));
   let total = 0;
   let georgia = 0;
@@ -371,12 +388,14 @@ async function meta(env: Env): Promise<Response> {
 
 async function status(env: Env): Promise<Response> {
   const since = nowIso(Date.now() - 24 * 3600_000);
-  const [run, queue, feedErrors, lastError] = await Promise.all([
+  const [run, queue, feedErrors, lastError, usage] = await Promise.all([
     env.DB.prepare(`SELECT run_id, trigger, started_at, finished_at, status, stats FROM pipeline_runs ORDER BY started_at DESC LIMIT 1`).first<Record<string, string | null>>(),
     env.DB.prepare(`SELECT status, COUNT(*) AS n FROM articles GROUP BY status`).all<{ status: string; n: number }>(),
     env.DB.prepare(`SELECT COUNT(*) AS n FROM pipeline_events WHERE stage = 'feed' AND outcome = 'error' AND created_at >= ?1`).bind(since).first<{ n: number }>(),
     // Most recent stage-level failure (e.g. Gemini rejecting the model name), newest first.
     env.DB.prepare(`SELECT stage, detail, created_at FROM pipeline_events WHERE outcome = 'error' AND article_id IS NULL AND stage != 'feed' AND created_at >= ?1 ORDER BY id DESC LIMIT 1`).bind(since).first<{ stage: string; detail: string | null; created_at: string }>(),
+    // Gemini requests counted today (Pacific quota day) when a daily call budget is set; see pipeline/budget.ts.
+    env.DB.prepare(`SELECT model, calls FROM llm_usage WHERE day = ?1`).bind(quotaDay(Date.now()).day).all<{ model: string; calls: number }>(),
   ]);
   let lastErrorOut: { stage: string; at: string; message: string } | null = null;
   if (lastError) {
@@ -396,9 +415,36 @@ async function status(env: Env): Promise<Response> {
     articles: Object.fromEntries(queue.results.map((r) => [r.status, r.n])),
     feedErrors24h: feedErrors?.n ?? 0,
     lastError: lastErrorOut,
+    geminiCallsToday: Object.fromEntries(usage.results.map((r) => [r.model, r.calls])),
   });
 }
+// ─── GET /api/ai-tech-directory ─────────────────────────────────────────────
+async function aiTechDirectory(sp: URLSearchParams): Promise<Response> {
+  const category = sp.get('category');
+  const tag = sp.get('tag');
+  const q = sp.get('q');
+  const featuredOnly = sp.get('featured') === 'true';
 
+  if (category && !AI_TECH_CATEGORIES.some((c) => c.id === category)) {
+    return fail(400, `unknown category "${category}"`);
+  }
+
+  let sources = AI_TECH_SOURCES;
+  if (category) sources = sourcesByCategory(category as AiTechCategoryId);
+  else if (tag) sources = sourcesByTag(tag);
+  else if (q) sources = searchSources(q);
+  if (featuredOnly) sources = featuredOnly && !category && !tag && !q ? featuredSources() : sources.filter((s) => s.featured);
+
+  return json(
+    {
+      categories: AI_TECH_CATEGORIES,
+      counts: countsByCategory(),
+      sources,
+    },
+    200,
+    'public, max-age=3600', // this directory changes rarely, unlike the news feed
+  );
+}
 // ─── POST /api/run[/stage] (admin) ──────────────────────────────────────────
 async function authorised(req: Request, env: Env): Promise<boolean> {
   if (!env.ADMIN_KEY) return false;
@@ -465,6 +511,7 @@ export async function handleApi(req: Request, env: Env): Promise<Response> {
   try {
     await ensureSchema(env);
     if (req.method === 'GET' || req.method === 'HEAD') {
+      if (path === '/api/ai-tech-directory') return await aiTechDirectory(url.searchParams);
       if (path === '/api/articles') return await listArticles(env, url.searchParams);
       const one = /^\/api\/articles\/([^/]+)$/.exec(path);
       if (one) return await getArticle(env, decodeURIComponent(one[1] as string), url.searchParams.get('lang'));

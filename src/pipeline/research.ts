@@ -5,8 +5,14 @@
 //  2. Add new items to a rolling pool (feed_items), de-duplicated by normalised URL.
 //  3. Cluster the pool by event, in code. A cluster is worth drafting only if it can
 //     pass the Fact-Checker's double-sourcing rule (>= 2 independent non-social
-//     publishers, or one primary/official source). Corroborating items often arrive in
-//     different runs, which is why the pool exists. Most runs end here with no LLM call.
+//     publishers, or one primary/official source) -- OR, for topics where genuine
+//     double-sourcing is structurally rare (Real Estate, VC & Startups, anything
+//     Georgia-flagged), one credible specialist-press source (weight >= 3.5). This
+//     SINGLE_SOURCE_OK rule is defined once in scoring.ts and imported here AND by
+//     factcheck.ts's final gate, so a story that is allowed to be drafted can never
+//     then be unconditionally rejected later for the same reason it was let through.
+//     Corroborating items often arrive in different runs, which is why the pool exists.
+//     Most runs end here with no LLM call.
 //  4. Ask the LLM to draft one briefing per top cluster, using only the cluster's text.
 //     Source links are attached from the items, never taken from the model's output.
 
@@ -22,7 +28,7 @@ import { importanceScore } from './importance';
 import { fetchFeed, sha, type RawItem } from './feeds';
 import { RESEARCH_SYSTEM } from './prompts';
 import { ResearchOutput } from './schemas';
-import { scoreArticle, type Citation } from './scoring';
+import { scoreArticle, SINGLE_SOURCE_OK, SINGLE_SOURCE_MIN_WEIGHT, type Citation } from './scoring';
 
 const MAX_ITEM_AGE_MS = 72 * 3600_000; // ignore very old feed items on ingest
 const POOL_WINDOW_MS = 36 * 3600_000; // how long an unused item stays eligible
@@ -46,6 +52,11 @@ export interface ClusterEval {
   independent: number;
   best: number;
   hasPrimary: boolean;
+  /** Whether this cluster may publish on one credible specialist source instead of two
+   * independents (Real Estate / VC & Startups / Georgia-flagged) -- passed straight into
+   * scoreArticle by canReachThreshold, so the pre-draft check and the final fact-check gate
+   * (factcheck.ts) always agree on the same cluster. */
+  singleSourceOk: boolean;
   eligible: boolean;
   priority: number;
 }
@@ -60,36 +71,89 @@ export function hintOf(items: FeedItemRow[]): string | null {
 }
 
 /**
+ * Round-robin grouping key for pickClusters ONLY (not used anywhere else): a Georgia-flagged cluster
+ * gets its own lane regardless of article category. Without this, a Georgia story (filed under
+ * Economics via articleCategoryFor) competes for selection against every Fed/ECB/inflation story,
+ * which have far more sources and always win on raw priority -- so Georgia could lose every round
+ * even with fair per-category round-robin.
+ */
+function roundRobinKey(items: FeedItemRow[]): string | null {
+  if (items.some((i) => i.georgia)) return 'Georgia';
+  return hintOf(items);
+}
+
+/**
  * Even if every claim is backed, can these sources reach the publish threshold? A cluster of two unknown blogs is
  * "double-sourced" but cannot score high enough, so drafting it would only spend model calls on a story that is rejected.
  */
 export const canReachThreshold = (ev: ClusterEval, threshold: number): boolean =>
-  scoreArticle(ev.citations, { total: 10, supported: 10, contradicted: 0 }, threshold).decision === 'publish';
+  scoreArticle(ev.citations, { total: 10, supported: 10, contradicted: 0 }, threshold, ev.singleSourceOk).decision === 'publish';
 
 /**
- * Choose the clusters to draft. Priority decides, but a topic with few recent stories gets a lift (4 for none,
- * 2 for one, 1.3 for two, and so on), and every pick counts against its topic, so a busy news day in one area cannot push
- * everything else off the site. `counts` is the number of stories per article category in the last 24 hours.
+ * Choose the clusters to draft. Within each round-robin lane (article category, or 'Georgia' for any
+ * Georgia-flagged cluster regardless of category -- see roundRobinKey), priority decides. Every pick
+ * always comes from whichever lane currently has the fewest stories in the last 24h (today's picks
+ * count too), so a heavily-sourced topic can never crowd out a thin one. `counts` is the number of
+ * stories per lane in the last 24 hours (category counts, plus a separate 'Georgia' count).
  */
-export function pickClusters<T extends { items: FeedItemRow[]; ev: ClusterEval }>(candidates: T[], counts: Map<string, number>, n: number): T[] {
-  const left = [...candidates];
+export interface LaneQuota {
+  /** Most stories one lane may get in the current 5-minute slot. */
+  perLane: number;
+  /** Stories each lane already has in this slot (category names, plus 'Georgia'; clusters with no topic count as 'General'). */
+  slotCounts: Map<string, number>;
+}
+
+export function pickClusters<T extends { items: FeedItemRow[]; ev: ClusterEval }>(candidates: T[], counts: Map<string, number>, n: number, quota?: LaneQuota): T[] {
   const have = new Map(counts);
+  const room = (lane: string, takenNow: number): boolean => !quota || (quota.slotCounts.get(lane) ?? 0) + takenNow < quota.perLane;
+  const takenNow = new Map<string, number>();
+  // Group eligible candidates by lane, best priority first within each lane.
+  const byTopic = new Map<string, T[]>();
+  const noTopic: T[] = [];
+  for (const c of candidates) {
+    const h = roundRobinKey(c.items);
+    if (h) {
+      const arr = byTopic.get(h) ?? [];
+      arr.push(c);
+      byTopic.set(h, arr);
+    } else {
+      noTopic.push(c);
+    }
+  }
+  for (const arr of byTopic.values()) arr.sort((a, b) => b.ev.priority - a.ev.priority);
+  noTopic.sort((a, b) => b.ev.priority - a.ev.priority);
+
+  const topics = [...byTopic.keys()];
   const picked: T[] = [];
-  while (picked.length < n && left.length) {
-    let at = 0;
-    let top = Number.NEGATIVE_INFINITY;
-    left.forEach((c, i) => {
-      const h = hintOf(c.items);
-      const score = c.ev.priority + (h ? 4 / (1 + (have.get(h) ?? 0)) : 0);
-      if (score > top) {
-        top = score;
-        at = i;
+
+  // Always take the next pick from whichever lane currently has the fewest stories (today's picks
+  // count too), so a heavily-sourced topic can never crowd out a thin one.
+  while (picked.length < n) {
+    let bestTopic: string | null = null;
+    let bestCount = Infinity;
+    for (const t of topics) {
+      const arr = byTopic.get(t) ?? [];
+      if (!arr.length || !room(t, takenNow.get(t) ?? 0)) continue;
+      const c = have.get(t) ?? 0;
+      if (c < bestCount) {
+        bestCount = c;
+        bestTopic = t;
       }
-    });
-    const [choice] = left.splice(at, 1) as [T];
-    picked.push(choice);
-    const h = hintOf(choice.items);
-    if (h) have.set(h, (have.get(h) ?? 0) + 1);
+    }
+    if (bestTopic) {
+      const arr = byTopic.get(bestTopic) as T[];
+      const choice = arr.shift() as T;
+      picked.push(choice);
+      have.set(bestTopic, (have.get(bestTopic) ?? 0) + 1);
+      takenNow.set(bestTopic, (takenNow.get(bestTopic) ?? 0) + 1);
+      continue;
+    }
+    if (noTopic.length && room('General', takenNow.get('General') ?? 0)) {
+      picked.push(noTopic.shift() as T);
+      takenNow.set('General', (takenNow.get('General') ?? 0) + 1);
+      continue;
+    }
+    break; // nothing eligible left anywhere
   }
   return picked;
 }
@@ -102,8 +166,14 @@ export function evaluateCluster(items: FeedItemRow[], now: number): ClusterEval 
   const hasPrimary = best >= 5;
   const newest = items.reduce((m, i) => Math.max(m, Date.parse(i.published_at)), 0);
   const ageHours = Math.max(0, (now - newest) / 3600_000);
-  const priority = (hasPrimary ? 3 : 0) + independent + best / 5 + (items.some((i) => i.georgia) ? 0.5 : 0) + Math.max(0, 1 - ageHours / 12);
-  return { citations, independent, best, hasPrimary, eligible: solid.length > 0 && (independent >= 2 || hasPrimary), priority };
+  const georgia = items.some((i) => i.georgia);
+  const topic = hintOf(items);
+  // One credible specialist source is enough for a structurally thin topic (or any Georgia story),
+  // instead of requiring two independents. Same rule factcheck.ts applies at the final gate.
+  const singleSourceOk = georgia || (topic != null && SINGLE_SOURCE_OK.has(topic));
+  const soloReady = singleSourceOk && best >= SINGLE_SOURCE_MIN_WEIGHT;
+  const priority = (hasPrimary ? 3 : 0) + independent + best / 5 + (georgia ? 0.5 : 0) + Math.max(0, 1 - ageHours / 12);
+  return { citations, independent, best, hasPrimary, singleSourceOk, eligible: solid.length > 0 && (independent >= 2 || hasPrimary || soloReady), priority };
 }
 
 // ─── collect ────────────────────────────────────────────────────────────────
@@ -146,7 +216,7 @@ async function collect(ctx: StageCtx, scheduled: FeedRef[]): Promise<{ polled: n
   const pageFeedIds = batch.filter((f) => f.kind === 'page').map((f) => f.id);
   const known = new Set<string>();
   if (pageFeedIds.length) {
-    const { results } = await env.DB.prepare(`SELECT DISTINCT feed_id FROM feed_items WHERE feed_id IN (SELECT value FROM json_each(?1))`)
+    const { results } = await env.DB.prepare(`SELECT j.value AS feed_id FROM json_each(?1) j WHERE EXISTS (SELECT 1 FROM feed_items f WHERE f.feed_id = j.value)`)
       .bind(JSON.stringify(pageFeedIds))
       .all<{ feed_id: string }>();
     for (const r of results) known.add(r.feed_id);
@@ -247,7 +317,7 @@ interface Candidate {
 
 /**
  * Collect: poll this tick's slice of the registry and add new items to the pool. No LLM.
- * In staged mode it runs twice per 5-minute slot (phase 0 at :00, phase 1 at :04), so the
+ * In staged mode it runs twice per cron slot (phase 0 at :00, phase 1 at :04), so the
  * counter advances by 2 per slot and every feed is still visited on a regular cycle.
  */
 export async function collectStage(ctx: StageCtx, phase = 0): Promise<Record<string, unknown>> {
@@ -262,6 +332,13 @@ export async function collectStage(ctx: StageCtx, phase = 0): Promise<Record<str
 export async function researchStage(ctx: StageCtx): Promise<Record<string, unknown>> {
   const { env, now, cfg } = ctx;
 
+  // With a daily Gemini budget, finish the stories already in the pipeline before drafting more: a draft that waits
+  // for its edit, fact-check and translation calls only uses up budget (and expires after a day if it never gets them).
+  if (ctx.budget) {
+    const backlog = await env.DB.prepare(`SELECT COUNT(*) AS n FROM articles WHERE status IN ('raw_research','edited')`).first<{ n: number }>();
+    if ((backlog?.n ?? 0) >= cfg.maxArticlesPerRun * 2) return { skipped: 'backlog: finishing the queued stories before drafting more', backlog: backlog?.n };
+  }
+
   // Clustering reads titles only, so the pool query leaves out the (long) snippets; the few items that
   // end up in a cluster get theirs in one more query below.
   const { results: pool } = await env.DB.prepare(
@@ -272,14 +349,33 @@ export async function researchStage(ctx: StageCtx): Promise<Record<string, unkno
     .bind(MAX_OFFERS, nowIso(now - POOL_WINDOW_MS), POOL_LIMIT)
     .all<FeedItemRow>();
 
-  const { results: recent } = await env.DB.prepare(`SELECT category, COUNT(*) AS n FROM articles WHERE created_at >= ?1 AND status != 'rejected' GROUP BY category`)
+  const { results: recent } = await env.DB.prepare(`SELECT category, COUNT(*) AS n FROM articles WHERE created_at >= ?1 AND status != 'rejected' GROUP BY +category`)
     .bind(nowIso(now - 24 * 3600_000))
     .all<{ category: string; n: number }>();
+  // Georgia gets its own round-robin lane (see roundRobinKey), so it needs its own count: how many
+  // Georgia-flagged stories (of any category) published in the last 24h.
+  const georgiaRecent = await env.DB.prepare(`SELECT COUNT(*) AS n FROM articles WHERE created_at >= ?1 AND status != 'rejected' AND georgia_related = 1`)
+    .bind(nowIso(now - 24 * 3600_000))
+    .first<{ n: number }>();
+  const counts = new Map(recent.map((r) => [r.category, r.n]));
+  counts.set('Georgia', georgiaRecent?.n ?? 0);
+
+  // Per-topic quota (PER_TOPIC_PER_RUN): how many stories each topic already got in this 5-minute slot.
+  let quota: LaneQuota | undefined;
+  if (cfg.perTopicPerRun > 0) {
+    const slotStart = nowIso(Math.floor(now / SLOT_MS) * SLOT_MS);
+    const { results: inSlot } = await env.DB.prepare(`SELECT category, COUNT(*) AS n FROM articles WHERE created_at >= ?1 AND status != 'rejected' GROUP BY +category`).bind(slotStart).all<{ category: string; n: number }>();
+    const inSlotGeorgia = await env.DB.prepare(`SELECT COUNT(*) AS n FROM articles WHERE created_at >= ?1 AND status != 'rejected' AND georgia_related = 1`).bind(slotStart).first<{ n: number }>();
+    const slotCounts = new Map(inSlot.map((r) => [r.category, r.n]));
+    slotCounts.set('Georgia', inSlotGeorgia?.n ?? 0);
+    quota = { perLane: cfg.perTopicPerRun, slotCounts };
+  }
+
   const eligible = clusterItems(pool)
     .map((items) => ({ items, ev: evaluateCluster(items, now) }))
     .filter((c) => c.ev.eligible && canReachThreshold(c.ev, cfg.publishThreshold))
     .sort((a, b) => b.ev.priority - a.ev.priority);
-  const clusters = pickClusters(eligible, new Map(recent.map((r) => [r.category, r.n])), cfg.maxArticlesPerRun)
+  const clusters = pickClusters(eligible, counts, cfg.maxArticlesPerRun, quota)
     .map(
       (c, i): Candidate => ({
         cid: `c${i + 1}`,

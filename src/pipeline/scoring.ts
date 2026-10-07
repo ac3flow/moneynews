@@ -11,9 +11,18 @@
 // An article is published only when ALL gates hold; the score alone is never enough:
 //   1. at least one non-social source (social signals are discovery only)
 //   2. double-sourced (>= 2 independent non-social publishers) OR backed by a primary source
+//      OR, for a topic in SINGLE_SOURCE_OK (passed in by the caller as `singleSourceOk`),
+//      one credible specialist-tier source (weight >= SINGLE_SOURCE_MIN_WEIGHT) is enough --
+//      genuine double-sourcing is structurally rare for an individual real-estate deal or
+//      funding round the way it isn't for a ceasefire every wire service reports at once.
 //   3. no claim contradicted by the sources
 //   4. at least 70% of claims supported
 //   5. score >= PUBLISH_THRESHOLD
+//
+// `singleSourceOk` is a plain boolean the caller computes (from the article's category and
+// georgia_related flag -- see research.ts's evaluateCluster and factcheck.ts's factCheckStage,
+// which must both pass the SAME value for a given article or it can pass one gate and fail the
+// other). Kept as a parameter, not inferred here, so this module stays pure and testable.
 
 export interface Citation {
   /** Publisher identity: two citations with the same key are not independent. */
@@ -59,13 +68,20 @@ export interface ScoreResult {
 export const MIN_CLAIM_SUPPORT = 0.7;
 const CONTRADICTION_PENALTY = 30;
 
+/** Topics where genuine double-sourcing is structurally rare (see module header). Single source of
+ * truth: research.ts and factcheck.ts both import this rather than keeping their own copy, so the
+ * draft-time check and the final fact-check gate can never drift apart. */
+export const SINGLE_SOURCE_OK: ReadonlySet<string> = new Set(['Real Estate', 'VC & Startups']);
+export const SINGLE_SOURCE_MIN_WEIGHT = 3.5;
+
 const round1 = (n: number): number => Math.round(n * 10) / 10;
 
-export function scoreArticle(citations: Citation[], claims: ClaimCheck, threshold: number): ScoreResult {
+export function scoreArticle(citations: Citation[], claims: ClaimCheck, threshold: number, singleSourceOk = false): ScoreResult {
   const solid = citations.filter((c) => !c.social);
   const independentSources = new Set(solid.map((c) => c.key)).size;
   const bestWeight = solid.reduce((m, c) => Math.max(m, c.weight), 0);
   const hasPrimary = bestWeight >= 5;
+  const soloOk = singleSourceOk && solid.length > 0 && bestWeight >= SINGLE_SOURCE_MIN_WEIGHT;
 
   const credibility = round1((bestWeight / 5) * 40);
   const corroboration = independentSources >= 3 ? 25 : independentSources === 2 ? 20 : independentSources === 1 ? 5 : 0;
@@ -79,7 +95,7 @@ export function scoreArticle(citations: Citation[], claims: ClaimCheck, threshol
 
   const reasons: RejectReason[] = [];
   if (solid.length === 0) reasons.push('no_non_social_source');
-  else if (independentSources < 2 && !hasPrimary) reasons.push('not_double_sourced');
+  else if (independentSources < 2 && !hasPrimary && !soloOk) reasons.push('not_double_sourced');
   if (claims.contradicted > 0) reasons.push('contradicted_claim');
   if (ratio < MIN_CLAIM_SUPPORT) reasons.push('low_claim_support');
   if (score < threshold) reasons.push('below_threshold');

@@ -9,7 +9,13 @@ import { MAX_ATTEMPTS, attemptCounts, logEvent, type StageCtx } from './context'
 import { FACTCHECK_SYSTEM } from './prompts';
 import { rejectStatement, verifyStatement } from './publish';
 import { FactCheckOutput } from './schemas';
-import { scoreArticle } from './scoring';
+import { scoreArticle, SINGLE_SOURCE_OK } from './scoring';
+
+/** Same rule research.ts's evaluateCluster uses at draft time, applied here from the stored article
+ * row instead of the live cluster -- a Real Estate / VC & Startups story, or any Georgia-flagged
+ * story, may publish on one credible specialist source instead of requiring two independents. Both
+ * places import SINGLE_SOURCE_OK from scoring.ts so they can never drift apart. */
+const singleSourceOkFor = (a: Pick<ArticleRow, 'category' | 'georgia_related'>): boolean => a.georgia_related === 1 || SINGLE_SOURCE_OK.has(a.category);
 
 export async function factCheckStage(ctx: StageCtx): Promise<Record<string, unknown>> {
   const { env, now, cfg } = ctx;
@@ -76,7 +82,7 @@ export async function factCheckStage(ctx: StageCtx): Promise<Record<string, unkn
         supported: res.claims.filter((c) => c.verdict === 'supported').length,
         contradicted: res.claims.filter((c) => c.verdict === 'contradicted').length,
       };
-      const r = scoreArticle(citationsFromLinks(links), claims, cfg.publishThreshold);
+      const r = scoreArticle(citationsFromLinks(links), claims, cfg.publishThreshold, singleSourceOkFor(a));
       const detail = {
         score: r.score,
         breakdown: r.breakdown,

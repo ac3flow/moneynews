@@ -994,7 +994,7 @@ async function boot() {
   renderFooter();
   await render();
   setInterval(renderLive, 1000);
-  setInterval(refreshMeta, POLL_MS);
+  setInterval(() => document.visibilityState === 'visible' && refreshMeta(), POLL_MS); // a background tab polls nothing: every poll is a D1 read
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && refreshMeta());
 }
 boot();

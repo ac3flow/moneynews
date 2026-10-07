@@ -4,6 +4,7 @@
 
 import type { ZodType } from 'zod';
 import type { Env } from '../types';
+import type { Budget } from './budget';
 
 export interface JsonRequest<T> {
   /** Stable instructions for the stage. Trusted. */
@@ -28,6 +29,16 @@ export class LlmError extends Error {
   }
 }
 
+/** The daily call budget (budget.ts) refused a request. Not a failure: the caller skips and tries again later. */
+export class LlmBudgetError extends LlmError {
+  constructor(readonly model: string) {
+    super(`daily Gemini call budget used up for ${model}`);
+    this.name = 'LlmBudgetError';
+  }
+}
+
+export const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
+
 // A model chosen for one stage (GEMINI_MODEL_KA) can be out of quota, not open to this key, or overloaded. Rather
 // than stall the pipeline, that call falls back to the default model, and the override is not tried again for a while:
 // ten minutes for quota and access (403, 404, 429), two for an overloaded or failing service (500, 502, 503, 504).
@@ -46,14 +57,16 @@ interface GeminiResponse {
 
 type Turn = { role: 'user' | 'model'; parts: { text: string }[] };
 
-export function createLlm(env: Env, fetchImpl: typeof fetch = fetch): Llm | null {
+export function createLlm(env: Env, fetchImpl: typeof fetch = fetch, budget: Budget | null = null): Llm | null {
   const apiKey = env.GEMINI_API_KEY;
   if (!apiKey) return null;
-  const model = env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+  const model = env.GEMINI_MODEL || DEFAULT_MODEL;
   const base = (env.GEMINI_BASE_URL || DEFAULT_BASE).replace(/\/+$/, '');
 
   async function call(system: string, contents: Turn[], modelOverride?: string): Promise<string> {
-    const wanted = modelOverride && modelOverride !== model && (unavailable.get(modelOverride) ?? 0) <= Date.now() ? modelOverride : model;
+    // The stage's own model is used unless it is paused after an error or its daily budget is spent; then the default model.
+    const wanted =
+      modelOverride && modelOverride !== model && (unavailable.get(modelOverride) ?? 0) <= Date.now() && (!budget || budget.allow(modelOverride)) ? modelOverride : model;
     try {
       return await callModel(system, contents, wanted);
     } catch (e) {
@@ -69,6 +82,11 @@ export function createLlm(env: Env, fetchImpl: typeof fetch = fetch): Llm | null
     let lastError: unknown;
     for (let attempt = 0; attempt < 2; attempt++) {
       if (attempt > 0) await new Promise((r) => setTimeout(r, 2000));
+      // Every request counts against Google's quota, retries included, so each one is checked and counted here.
+      if (budget) {
+        if (!budget.allow(useModel)) throw new LlmBudgetError(useModel);
+        budget.record(useModel);
+      }
       try {
         const res = await fetchImpl(`${base}/models/${useModel}:generateContent`, {
           method: 'POST',
