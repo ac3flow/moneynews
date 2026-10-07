@@ -7,6 +7,9 @@ import { h, svg } from './dom.js';
 
 const FILLS = ['f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7'];
 const STROKES = ['s1', 's2', 's3', 's4', 's5', 's6', 's7'];
+// Colour order for categories that must tell apart (slices, series, parties): emerald, amber, violet, teal, sky, deep emerald, grey.
+const SERIES_F = ['f1', 'f3', 'f4', 'f6', 'f7', 'f2', 'f5'];
+const SERIES_S = ['s1', 's3', 's4', 's6', 's7', 's2', 's5'];
 const r1 = (n) => (Math.round(n * 10) / 10).toString();
 const r2 = (n) => (Math.round(n * 100) / 100).toString();
 const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
@@ -96,7 +99,7 @@ function legendList(parts) {
   return h(
     'ul',
     { class: 'legend' },
-    parts.map((it, n) => h('li', {}, svg('svg', { viewBox: '0 0 10 10', 'aria-hidden': 'true' }, svg('rect', { class: FILLS[n % FILLS.length], width: 10, height: 10 })), h('span', { text: it.label, title: it.label }), h('b', { text: it.text ?? String(it.n) }))),
+    parts.map((it, n) => h('li', {}, svg('svg', { viewBox: '0 0 10 10', 'aria-hidden': 'true' }, svg('rect', { class: SERIES_F[n % SERIES_F.length], width: 10, height: 10 })), h('span', { text: it.label, title: it.label }), h('b', { text: it.text ?? String(it.n) }))),
   );
 }
 
@@ -110,7 +113,7 @@ export function donut(items, { center, aria } = {}) {
   const segs = parts.map((it, i) => {
     const arc = (it.n / total) * C;
     const len = Math.max(0.5, arc - (parts.length > 1 ? 1.6 : 0));
-    const el = svg('circle', { class: `ring ${STROKES[i % STROKES.length]}`, cx: 50, cy: 50, r: R, 'stroke-dasharray': `${r2(len)} ${r2(C - len)}`, 'stroke-dashoffset': r2(-off), transform: 'rotate(-90 50 50)' }, svg('title', {}, `${it.label}: ${it.text ?? it.n}`));
+    const el = svg('circle', { class: `ring ${SERIES_S[i % SERIES_S.length]}`, cx: 50, cy: 50, r: R, 'stroke-dasharray': `${r2(len)} ${r2(C - len)}`, 'stroke-dashoffset': r2(-off), transform: 'rotate(-90 50 50)' }, svg('title', {}, `${it.label}: ${it.text ?? it.n}`));
     off += arc;
     return el;
   });
@@ -287,7 +290,7 @@ export function funnel(items, { aria } = {}) {
     const w0 = widthOf(it.value);
     const w1 = items[i + 1] ? Math.min(w0, widthOf(items[i + 1].value)) : w0 * 0.8;
     kids.push(
-      svg('polygon', { class: FILLS[Math.min(i, 3)], points: `${r1(cx - w0 / 2)},${y} ${r1(cx + w0 / 2)},${y} ${r1(cx + w1 / 2)},${y + rowH} ${r1(cx - w1 / 2)},${y + rowH}` }, svg('title', {}, `${it.label}: ${it.text}`)),
+      svg('polygon', { class: i === 0 ? 'f1' : 'f2', points: `${r1(cx - w0 / 2)},${y} ${r1(cx + w0 / 2)},${y} ${r1(cx + w1 / 2)},${y + rowH} ${r1(cx - w1 / 2)},${y + rowH}` }, svg('title', {}, `${it.label}: ${it.text}`)),
       svg('text', { class: 'fl', x: 0, y: y + 16 }, svg('title', {}, it.label), clip(it.label, 20)),
       svg('text', { class: 'fv', x: 0, y: y + 33 }, it.text),
     );
@@ -458,14 +461,309 @@ export function eventTimeline(items, { today, todayLabel, aria } = {}) {
   );
 }
 
-// ─── key numbers ─────────────────────────────────────────────────────────────
+// ─── upright columns: one series, grouped, or stacked ──────────────────────
 
-/** Figure tiles. items: [{ label, value }]. */
-export function kpiTiles(items) {
+function seriesLegend(names) {
   return h(
-    'div',
-    { class: 'kpis' },
-    items.map((i) => h('div', { class: 'kpi' }, h('p', { class: 'kpi-v', text: i.value }), h('p', { class: 'kpi-l', text: i.label }))),
+    'ul',
+    { class: 'legend row' },
+    names.map((name, n) => h('li', {}, svg('svg', { viewBox: '0 0 10 10', 'aria-hidden': 'true' }, svg('rect', { class: SERIES_F[n % SERIES_F.length], width: 10, height: 10 })), h('span', { text: name, title: name }))),
   );
 }
 
+/**
+ * Upright columns. labels: one per group. series: [{ name, values }]. One series is a plain column chart; several are
+ * grouped side by side, or summed into one column per group when `stacked`.
+ */
+export function columns({ labels, series, aria, fmt = r1, stacked = false, W = 340, H = 170 }) {
+  const pl = 34;
+  const pr = 10;
+  const pt = 14;
+  const pb = 28;
+  const iw = W - pl - pr;
+  const ih = H - pt - pb;
+  const sums = labels.map((_, i) => series.reduce((t, s) => t + (s.values[i] ?? 0), 0));
+  const top = niceMax(stacked ? Math.max(...sums) : Math.max(...series.flatMap((s) => s.values)));
+  const y = (v) => pt + (1 - v / top) * ih;
+  const base = pt + ih;
+  const kids = [];
+  for (const g of [0, 0.5, 1]) {
+    const yy = pt + g * ih;
+    kids.push(svg('path', { class: 'grid', d: `M${pl} ${yy.toFixed(1)}H${W - pr}` }), svg('text', { x: pl - 6, y: (yy + 3.5).toFixed(1), 'text-anchor': 'end' }, fmt(top * (1 - g))));
+  }
+  const gw = iw / labels.length;
+  const inner = gw * 0.72;
+  const bw = stacked ? inner : inner / series.length;
+  const fit = Math.max(3, Math.floor(gw / 5.8));
+  labels.forEach((l, i) => {
+    const gx = pl + i * gw + (gw - inner) / 2;
+    let acc = 0;
+    series.forEach((s, si) => {
+      const v = s.values[i] ?? 0;
+      const x = stacked ? gx : gx + si * bw;
+      const top0 = stacked ? y(acc + v) : y(v);
+      const hgt = stacked ? y(acc) - y(acc + v) : base - y(v);
+      acc += v;
+      if (hgt <= 0) return;
+      kids.push(svg('rect', { class: SERIES_F[si % SERIES_F.length], x: x.toFixed(1), y: top0.toFixed(1), width: Math.max(1, bw - 1.5).toFixed(1), height: hgt.toFixed(1), rx: 2 }, svg('title', {}, `${l}${series.length > 1 ? ` · ${s.name}` : ''}: ${fmt(v)}`)));
+      if (series.length === 1 && bw >= 22) kids.push(svg('text', { class: 'val', x: (x + (bw - 1.5) / 2).toFixed(1), y: (top0 - 4).toFixed(1), 'text-anchor': 'middle' }, fmt(v)));
+    });
+    if (stacked && bw >= 22) kids.push(svg('text', { class: 'val', x: (gx + inner / 2).toFixed(1), y: (y(sums[i]) - 4).toFixed(1), 'text-anchor': 'middle' }, fmt(sums[i])));
+    kids.push(svg('text', { x: (pl + i * gw + gw / 2).toFixed(1), y: H - 9, 'text-anchor': 'middle' }, svg('title', {}, l), clip(l, fit)));
+  });
+  const chart = svg('svg', { class: 'chart', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': aria }, kids);
+  return series.length > 1 ? h('div', {}, chart, seriesLegend(series.map((s) => s.name))) : chart;
+}
+
+/** Horizontal stacked bars: one row per item, its parts side by side. rows: [{ label, total, parts: number[] }]. */
+export function stackedRows({ rows, names, fmt = r1, aria }) {
+  const top = Math.max(1e-9, ...rows.map((r) => r.parts.reduce((t, v) => t + v, 0)));
+  return h(
+    'div',
+    { role: 'img', 'aria-label': aria },
+    h(
+      'div',
+      { class: 'bars' },
+      rows.map((r) => {
+        let acc = 0;
+        const sum = r.parts.reduce((t, v) => t + v, 0);
+        return h(
+          'div',
+          { class: 'bar-row' },
+          h('span', { text: r.label, title: r.label }),
+          h('b', { text: fmt(sum) }),
+          svg(
+            'svg',
+            { class: 'bar', viewBox: '0 0 100 8', preserveAspectRatio: 'none', 'aria-hidden': 'true' },
+            svg('rect', { class: 'trk', width: 100, height: 8 }),
+            r.parts.map((v, i) => {
+              const x = (acc / top) * 100;
+              acc += v;
+              return v > 0 ? svg('rect', { class: SERIES_F[i % SERIES_F.length], x: x.toFixed(1), width: Math.max(0.6, (v / top) * 100 - 0.4).toFixed(1), height: 8 }, svg('title', {}, `${r.label} · ${names[i]}: ${fmt(v)}`)) : null;
+            }),
+          ),
+        );
+      }),
+    ),
+    seriesLegend(names),
+  );
+}
+
+// ─── slopegraph ─────────────────────────────────────────────────────────────
+
+/** Space labels at least `gap` apart, keeping their order. */
+function spread(ys, gap) {
+  const order = ys.map((y, i) => [y, i]).sort((a, b) => a[0] - b[0]);
+  const out = [...ys];
+  let prev = -Infinity;
+  for (const [y, i] of order) {
+    out[i] = Math.max(y, prev + gap);
+    prev = out[i];
+  }
+  return out;
+}
+
+/** Slopegraph: each item runs from its value at one moment to its value at another. items: [{ label, a, b, aText, bText }]. */
+export function slope(items, { from, to, aria }) {
+  const W = 340;
+  const pt = 30;
+  const pb = 12;
+  const H = Math.max(120, items.length * 30 + pt + pb);
+  const xa = 124;
+  const xb = 216;
+  const all = items.flatMap((i) => [i.a, i.b]);
+  const lo = Math.min(...all);
+  const hi = Math.max(...all);
+  const span = hi - lo || 1;
+  const y = (v) => pt + (1 - (v - lo) / span) * (H - pt - pb);
+  const ya = spread(items.map((i) => y(i.a)), 14);
+  const yb = spread(items.map((i) => y(i.b)), 14);
+  const kids = [svg('text', { class: 'sl-h', x: xa, y: 12, 'text-anchor': 'middle' }, clip(from, 14)), svg('text', { class: 'sl-h', x: xb, y: 12, 'text-anchor': 'middle' }, clip(to, 14))];
+  items.forEach((it, i) => {
+    const cls = it.b > it.a ? 's1' : it.b < it.a ? 'sneg' : 's3';
+    kids.push(
+      svg('path', { class: `ln ${cls}`, d: `M${xa} ${r1(y(it.a))}L${xb} ${r1(y(it.b))}` }, svg('title', {}, `${it.label}: ${it.aText} → ${it.bText}`)),
+      svg('circle', { class: `dot ${cls}`, cx: xa, cy: r1(y(it.a)), r: 3 }),
+      svg('circle', { class: `dot ${cls}`, cx: xb, cy: r1(y(it.b)), r: 3 }),
+      svg('text', { class: 'sl-t', x: xa - 9, y: r1(ya[i] + 3.5), 'text-anchor': 'end' }, svg('title', {}, it.label), `${clip(it.label, 11)} ${it.aText}`),
+      svg('text', { class: 'sl-t', x: xb + 9, y: r1(yb[i] + 3.5) }, `${it.bText} ${clip(it.label, 11)}`),
+    );
+  });
+  return svg('svg', { class: 'chart', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': aria }, kids);
+}
+
+// ─── gantt ──────────────────────────────────────────────────────────────────
+
+/** Periods on a shared date axis. items: [{ label, start, end (whole days since 1970), range }], earliest start first. */
+export function gantt(items, { today, todayLabel, aria }) {
+  const W = 340;
+  const rowH = 36;
+  const pl = 8;
+  const pr = 8;
+  const lo = Math.min(...items.map((i) => i.start));
+  const hi = Math.max(...items.map((i) => i.end));
+  const span = hi - lo || 1;
+  const x = (d) => pl + ((d - lo) / span) * (W - pl - pr);
+  const H = items.length * rowH + 14;
+  const kids = [];
+  if (today != null && today >= lo && today <= hi) {
+    kids.push(svg('path', { class: 'tl-today', d: `M${r1(x(today))} 4V${H - 4}` }));
+    if (todayLabel) kids.push(svg('text', { class: 'tl-lbl', x: r1(x(today) + 3), y: H - 1 }, todayLabel));
+  }
+  items.forEach((it, i) => {
+    const top = i * rowH + 4;
+    const w = Math.max(5, x(it.end) - x(it.start));
+    kids.push(
+      svg('text', { class: 'gl', x: pl, y: top + 10 }, svg('title', {}, it.label), clip(it.label, 26)),
+      svg('text', { class: 'gd', x: W - pr, y: top + 10, 'text-anchor': 'end' }, it.range),
+      svg('rect', { class: 'trk2', x: pl, y: top + 16, width: W - pl - pr, height: 8, rx: 4 }),
+      svg('rect', { class: SERIES_F[i % SERIES_F.length], x: r1(x(it.start)), y: top + 16, width: r1(Math.min(w, W - pr - x(it.start))), height: 8, rx: 4 }, svg('title', {}, `${it.label}: ${it.range}`)),
+    );
+  });
+  return svg('svg', { class: 'chart', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': aria }, kids);
+}
+
+// ─── network ────────────────────────────────────────────────────────────────
+
+/**
+ * Nodes and the links between them. nodes: [{ label }], links: [{ from, to, label }] (positions in nodes). The best connected node
+ * sits in the middle when there are four or more; the rest sit on an ellipse around it.
+ */
+export function network({ nodes, links, aria }) {
+  const W = 340;
+  const H = 250;
+  const cx = W / 2;
+  const cy = H / 2;
+  const deg = nodes.map((_, i) => links.filter((l) => l.from === i || l.to === i).length);
+  const hub = nodes.length >= 4 && Math.max(...deg) >= 2 ? deg.indexOf(Math.max(...deg)) : -1;
+  const rest = nodes.map((_, i) => i).filter((i) => i !== hub);
+  const pos = nodes.map(() => [cx, cy]);
+  rest.forEach((i, k) => {
+    const a = -Math.PI / 2 + (k * 2 * Math.PI) / rest.length;
+    pos[i] = [cx + Math.cos(a) * 112, cy + Math.sin(a) * 80];
+  });
+  const kids = [];
+  for (const l of links) {
+    const [x1, y1] = pos[l.from];
+    const [x2, y2] = pos[l.to];
+    kids.push(svg('path', { class: 'e-line', d: `M${r1(x1)} ${r1(y1)}L${r1(x2)} ${r1(y2)}` }));
+  }
+  for (const l of links) {
+    if (!l.label) continue;
+    const [x1, y1] = pos[l.from];
+    const [x2, y2] = pos[l.to];
+    kids.push(svg('text', { class: 'e-lbl', x: r1((x1 + x2) / 2), y: r1((y1 + y2) / 2 + 3), 'text-anchor': 'middle' }, clip(l.label, 16)));
+  }
+  nodes.forEach((n, i) => {
+    const [x, y] = pos[i];
+    const below = y >= cy - 4;
+    kids.push(
+      svg('circle', { class: `${i === hub ? 'f1' : SERIES_F[(i % 6) + 1]} node`, cx: r1(x), cy: r1(y), r: Math.min(12, 6 + deg[i] * 2) }, svg('title', {}, n.label)),
+      svg('text', { class: 'n-lbl', x: r1(x), y: r1(below ? y + Math.min(12, 6 + deg[i] * 2) + 11 : y - Math.min(12, 6 + deg[i] * 2) - 5), 'text-anchor': 'middle' }, svg('title', {}, n.label), clip(n.label, 16)),
+    );
+  });
+  return svg('svg', { class: 'chart', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': aria }, kids);
+}
+
+// ─── pie, waffle, Nightingale rose, parliament ──────────────────────────────
+
+/** Pie: items [{ label, n, text }], seven slices at most. */
+export function pie(items, { aria } = {}) {
+  const parts = items.filter((i) => i.n > 0).slice(0, 7);
+  const total = parts.reduce((s, i) => s + i.n, 0) || 1;
+  const R = 25;
+  const C = 2 * Math.PI * R;
+  let off = 0;
+  const segs = parts.map((it, i) => {
+    const arc = (it.n / total) * C;
+    const len = Math.max(0.5, arc - (parts.length > 1 ? 0.8 : 0));
+    const el = svg('circle', { class: `pie-seg ${SERIES_S[i % SERIES_S.length]}`, cx: 50, cy: 50, r: R, 'stroke-dasharray': `${r2(len)} ${r2(C - len)}`, 'stroke-dashoffset': r2(-off), transform: 'rotate(-90 50 50)' }, svg('title', {}, `${it.label}: ${it.text ?? it.n}`));
+    off += arc;
+    return el;
+  });
+  return h('div', { class: 'donut-wrap' }, svg('svg', { class: 'donut', viewBox: '0 0 100 100', role: 'img', 'aria-label': aria }, segs), legendList(parts));
+}
+
+/** Waffle: one percentage as a hundred squares, filled from the bottom left. */
+export function waffle(value, { text, label, aria } = {}) {
+  const filled = Math.round(clamp(value, 0, 100));
+  const cells = [];
+  for (let k = 0; k < 100; k++) {
+    const row = 9 - Math.floor(k / 10);
+    const col = k % 10;
+    cells.push(svg('rect', { class: k < filled ? 'f1' : 'trk', x: col * 10 + 0.8, y: row * 10 + 0.8, width: 8.4, height: 8.4, rx: 1.6 }));
+  }
+  return h(
+    'div',
+    { class: 'donut-wrap' },
+    svg('svg', { class: 'donut', viewBox: '0 0 100 100', role: 'img', 'aria-label': aria }, cells),
+    h('div', { class: 'waffle-note' }, h('b', { text: text ?? `${filled}%` }), label ? h('span', { text: label }) : null),
+  );
+}
+
+/** Nightingale rose: one petal per item, its area following the value. items: [{ label, n, text }]. */
+export function rose(items, { aria } = {}) {
+  const parts = items.filter((i) => i.n > 0).slice(0, 7);
+  const top = Math.max(1e-9, ...parts.map((i) => i.n));
+  const k = parts.length;
+  const step = (2 * Math.PI) / k;
+  const petals = parts.map((it, i) => {
+    const r = 46 * Math.sqrt(it.n / top);
+    const a0 = -Math.PI / 2 + i * step + 0.02;
+    const a1 = -Math.PI / 2 + (i + 1) * step - 0.02;
+    const p = (a) => `${r1(50 + Math.cos(a) * r)} ${r1(50 + Math.sin(a) * r)}`;
+    return svg('path', { class: SERIES_F[i % SERIES_F.length], d: `M50 50L${p(a0)}A${r1(r)} ${r1(r)} 0 0 1 ${p(a1)}Z` }, svg('title', {}, `${it.label}: ${it.text ?? it.n}`));
+  });
+  return h('div', { class: 'donut-wrap' }, svg('svg', { class: 'donut', viewBox: '0 0 100 100', role: 'img', 'aria-label': aria }, petals), legendList(parts));
+}
+
+/** Parliament chart: seats as dots on concentric arcs, parties in order from left to right. items: [{ label, n, text }], whole counts. */
+export function parliament(items, { center, aria } = {}) {
+  const parts = items.filter((i) => i.n > 0);
+  const N = parts.reduce((s, i) => s + i.n, 0);
+  const W = 340;
+  const H = 176;
+  const cx = W / 2;
+  const cy = H - 14;
+  const R = 150;
+  const r0 = R * 0.38;
+  const rows = clamp(Math.round(Math.sqrt(N / 2.4)), 2, 9);
+  const radii = Array.from({ length: rows }, (_, i) => r0 + ((R - r0) * i) / (rows - 1));
+  const sum = radii.reduce((t, r) => t + r, 0);
+  const counts = radii.map((r) => Math.max(1, Math.round((N * r) / sum)));
+  let diff = N - counts.reduce((t, c) => t + c, 0);
+  for (let i = rows - 1; diff !== 0; i = (i - 1 + rows) % rows) {
+    const d = diff > 0 ? 1 : -1;
+    if (counts[i] + d >= 1) {
+      counts[i] += d;
+      diff -= d;
+    }
+  }
+  const seats = [];
+  radii.forEach((r, i) => {
+    const k = counts[i];
+    for (let j = 0; j < k; j++) {
+      const a = k === 1 ? Math.PI / 2 : Math.PI * (1 - j / (k - 1));
+      seats.push({ a, r, x: cx + Math.cos(a) * r, y: cy - Math.sin(a) * r });
+    }
+  });
+  seats.sort((p, q) => q.a - p.a || p.r - q.r);
+  const gap = Math.min((R - r0) / (rows - 1), (Math.PI * R) / Math.max(1, counts[rows - 1] - 1));
+  const dot = Math.max(1.4, gap * 0.4);
+  const owner = [];
+  parts.forEach((p, i) => owner.push(...Array(p.n).fill(i)));
+  const kids = seats.map((s, k) => svg('circle', { class: SERIES_F[owner[k] % SERIES_F.length], cx: r1(s.x), cy: r1(s.y), r: r1(dot) }, svg('title', {}, `${parts[owner[k]].label}: ${parts[owner[k]].text ?? parts[owner[k]].n}`)));
+  if (center) kids.push(svg('text', { class: 'c-val', x: cx, y: cy - 4, 'text-anchor': 'middle' }, center));
+  return h('div', {}, svg('svg', { class: 'chart', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': aria }, kids), legendList(parts));
+}
+
+// ─── key terms ──────────────────────────────────────────────────────────────
+
+/** Word cloud: terms [{ text, w }] with w from 1 (small) to 5 (large); the layout is a centred flow of words sized by weight. */
+export function wordCloud(terms, { aria } = {}) {
+  return h(
+    'div',
+    { class: 'cloud', role: 'img', 'aria-label': aria },
+    terms.map((t, i) => h('span', { class: `cw cw-${t.w} cc-${i % 5}`, text: t.text })),
+  );
+}

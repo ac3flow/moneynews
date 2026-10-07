@@ -7,11 +7,11 @@ export const DEFAULT_LANG = 'ka';
 
 export const DICT = {
   ka: {
-    docTitle: 'Money News',
+    docTitle: 'Bulab.news',
     docDesc: 'ბიზნესი, ტექნოლოგიები და საქართველო: სიახლეები, რომლებსაც ყოველ ხუთ წუთში ვიკვლევთ, ვასწორებთ და ფაქტებს ვამოწმებთ. თითოეული სიახლე უთითებს წყაროებზე, რომლებზეც ის არის დაფუძნებული.',
     skip: 'გადასვლა სიახლეებზე',
     noscript: 'სიახლეების სანახავად ჩართეთ JavaScript.',
-    brandAria: 'Money News, მთავარი გვერდი',
+    brandAria: 'Bulab.news, მთავარი გვერდი',
     langAria: 'ენა',
     themeAria: 'ღია და მუქი რეჟიმის გადართვა',
     searchPlaceholder: 'ძიება ამბებში…',
@@ -115,8 +115,8 @@ export const DICT = {
     related: 'მსგავსი ამბები',
 
     vizTitle: 'ამბავი გრაფიკებში',
-    vizKey: 'მთავარი მაჩვენებლები',
     vzFigures: 'მთავარი მაჩვენებლების შედარება',
+    vzTerms: 'ამბის მთავარი სიტყვები',
     tlToday: 'დღეს',
     'inDays.one': '{n} დღეში',
     'inDays.other': '{n} დღეში',
@@ -158,16 +158,16 @@ export const DICT = {
     footTag: 'ბიზნესი, ტექნოლოგიები და საქართველო. ყოველ ხუთ წუთში ვიკვლევთ, ვასწორებთ, ფაქტებს ვამოწმებთ და ქართულად ვთარგმნით.',
     footTopics: 'თემები',
     footPages: 'გვერდები',
-    footCopy: '© {year} Money News',
+    footCopy: '© {year} Bulab.news',
     footTime: 'დრო ნაჩვენებია Asia/Tbilisi (GMT+4) ზონაში. ინახება UTC-ში.',
   },
 
   en: {
-    docTitle: 'Money News',
+    docTitle: 'Bulab.news',
     docDesc: 'Business, technology and Georgia news, researched, edited and fact-checked every five minutes. Each story links to the sources it is based on.',
     skip: 'Skip to stories',
     noscript: 'Turn on JavaScript to read the news.',
-    brandAria: 'Money News, home',
+    brandAria: 'Bulab.news, home',
     langAria: 'Language',
     themeAria: 'Switch between light and dark mode',
     searchPlaceholder: 'Search stories…',
@@ -271,8 +271,8 @@ export const DICT = {
     related: 'Related stories',
 
     vizTitle: 'The story in graphs',
-    vizKey: 'Key numbers',
     vzFigures: 'Key figures compared',
+    vzTerms: 'Key words of the story',
     tlToday: 'Today',
     'inDays.one': 'in {n} day',
     'inDays.other': 'in {n} days',
@@ -314,7 +314,7 @@ export const DICT = {
     footTag: 'Business, technology and Georgia. Researched, edited, fact-checked and translated into Georgian every five minutes.',
     footTopics: 'Topics',
     footPages: 'Pages',
-    footCopy: '© {year} Money News',
+    footCopy: '© {year} Bulab.news',
     footTime: 'Times shown in Asia/Tbilisi (GMT+4). Stored in UTC.',
   },
 };

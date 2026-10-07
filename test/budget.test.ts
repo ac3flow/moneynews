@@ -50,7 +50,7 @@ describe('loadBudget', () => {
     expect(b.allow('ka-model')).toBe(true); // separate allowance
     b.record('ka-model');
     await b.flush();
-    expect(rows<{ model: string; calls: number }>(env, `SELECT model, calls FROM llm_usage ORDER BY model`)).toEqual([
+    expect(rows<{ model: string; calls: number }>(env, `SELECT model, calls FROM llm_usage ORDER BY model DESC`)).toEqual([
       { model: 'ka-model', calls: 1 },
       { model: MAIN, calls: 3 },
     ]);
@@ -112,7 +112,7 @@ describe('Gemini client with a budget', () => {
 describe('pipeline with a spent budget', () => {
   it('skips the Gemini stages, calls nothing, and leaves the stories queued', async () => {
     const env = makeEnv({ GEMINI_API_KEY: 'k', GEMINI_DAILY_CALLS: '800' });
-    insertArticle(env, { id: 'queued', status: 'raw_research' });
+    insertArticle(env, { id: 'queued', status: 'raw_research', created_at: new Date(LATE - 3600_000).toISOString() });
     await env.DB.prepare(`CREATE TABLE IF NOT EXISTS llm_usage (day TEXT NOT NULL, model TEXT NOT NULL, calls INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, model))`).run();
     await env.DB.prepare(`INSERT INTO llm_usage (day, model, calls) VALUES (?1, ?2, 800)`).bind(quotaDay(LATE).day, MAIN).run();
     const fetchSpy = vi.fn(async () => okReplyForPipeline());

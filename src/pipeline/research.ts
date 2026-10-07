@@ -458,7 +458,7 @@ export async function researchStage(ctx: StageCtx): Promise<Record<string, unkno
     const { kept, dropped } = groundCharts(
       proposed,
       // the day each item was published counts as stated: a story about something launched today may date it so
-      [...items.map((i) => `${i.title}\n${i.snippet ?? ''}\n${i.published_at.slice(0, 10)}`), b.headline, b.summary, b.what_happened, b.figures_dates].join('\n'),
+      [...items.map((i) => `${i.title}\n${i.snippet ?? ''}\n${i.published_at.slice(0, 10)}`), b.headline, b.summary, b.what_happened, b.figures_dates, b.affected_entities].join('\n'),
       now,
     );
     if (kept.length) {

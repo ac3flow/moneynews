@@ -145,15 +145,15 @@ describe('Georgian lifecycle: Fact-Check -> Translate -> Georgian Grammar -> Pub
 
 describe('staged cron triggers (Workers Free)', () => {
   it('five triggers cover every stage of the pipeline, in order', () => {
-    expect(Object.keys(STAGED_CRONS)).toEqual(['*/5 * * * *', '1-59/5 * * * *', '2-59/5 * * * *', '3-59/5 * * * *', '4-59/5 * * * *']);
+    expect(Object.keys(STAGED_CRONS)).toEqual(['*/20 4-19 * * *', '1-59/20 4-19 * * *', '2-59/20 4-19 * * *', '3-59/20 4-19 * * *', '4-59/20 4-19 * * *']);
     const covered = Object.values(STAGED_CRONS).flat().map((s) => (s === 'collect2' ? 'collect' : s));
     expect([...new Set(covered)]).toEqual(PIPELINE_ORDER);
   });
 
   it('single mode and unknown crons run everything', () => {
-    expect(stagesForCron('single', '*/5 * * * *')).toEqual(PIPELINE_ORDER);
+    expect(stagesForCron('single', '*/20 4-19 * * *')).toEqual(PIPELINE_ORDER);
     expect(stagesForCron('staged', '7 7 7 7 7')).toEqual(PIPELINE_ORDER);
-    expect(stagesForCron(undefined, '2-59/5 * * * *')).toEqual(['fact_check', 'translate']);
+    expect(stagesForCron(undefined, '2-59/20 4-19 * * *')).toEqual(['fact_check', 'translate']);
   });
 
   it('an article drafted at :01 is published at :03, one trigger at a time', async () => {
@@ -163,30 +163,30 @@ describe('staged cron triggers (Workers Free)', () => {
       'https://www.federalreserve.gov/feeds/press_all.xml': rss([{ title: 'Federal Reserve issues FOMC statement holding rates at 4.25 percent', link: 'https://www.federalreserve.gov/newsevents/pressreleases/monetary20261003a.htm', pub: pub(2), desc: 'The Committee decided to maintain the target range at 4.25 percent.' }]),
     });
     const llm = fakeLlm();
-    const at = (min: number) => NOW + min * 60_000; // NOW is :15 -> a */5 boundary
+    const at = (min: number) => NOW + min * 60_000; // NOW is :15 -> a */20 boundary
     const trig = (cron: string, min: number) => runPipeline(env, { trigger: 'cron', stages: stagesForCron('staged', cron), now: at(min), llm });
     const status = () => state(env, rows<{ id: string }>(env, `SELECT id FROM articles`)[0]?.id ?? '')?.status;
 
-    await trig('*/5 * * * *', 0);
+    await trig('*/20 4-19 * * *', 0);
     expect(llm.calls).toEqual([]); // collect only fills the pool
     expect(rows<{ n: number }>(env, `SELECT COUNT(*) n FROM feed_items`)[0]?.n).toBe(1);
 
-    await trig('1-59/5 * * * *', 1);
+    await trig('1-59/20 4-19 * * *', 1);
     expect(llm.calls).toEqual(['research', 'edit']);
     expect(status()).toBe('edited');
     expect(rows<ArticleRow>(env, `SELECT * FROM articles`)[0]?.fact_checked).toBe(0);
 
-    await trig('2-59/5 * * * *', 2);
+    await trig('2-59/20 4-19 * * *', 2);
     expect(llm.calls.slice(2)).toEqual(['fact_check', 'translate']);
     expect(rows<ArticleRow>(env, `SELECT * FROM articles`)[0]?.fact_checked).toBe(1);
     expect(status()).toBe('edited');
 
-    await trig('3-59/5 * * * *', 3);
+    await trig('3-59/20 4-19 * * *', 3);
     expect(llm.calls.slice(4)).toEqual(['ka_grammar', 'ka_review']);
     expect(status()).toBe('published');
     expect(rows<ArticleRow>(env, `SELECT * FROM articles`)[0]?.published_at).toBe(new Date(at(3)).toISOString());
 
-    await trig('4-59/5 * * * *', 4); // second collect: no new work, no crash
+    await trig('4-59/20 4-19 * * *', 4); // second collect: no new work, no crash
     expect(status()).toBe('published');
   });
 });

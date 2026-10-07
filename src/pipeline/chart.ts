@@ -29,29 +29,52 @@ function dateStated(date: string, text: string, known: Set<string>, nowYear: num
   return dayOk && monthOk && yearOk;
 }
 
+/** A node of a network graph is grounded when every word of its name (three letters or more) appears in the text the story was drawn from. */
+function nameStated(label: string, lowerText: string): boolean {
+  const words = label.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? [];
+  return words.length ? words.every((w) => lowerText.includes(w)) : lowerText.includes(label.trim().toLowerCase());
+}
+
 /**
- * The English chart written by the Research agent. Kept only when every bar value, target and scale
- * maximum, every timeline date, and every number written inside a label or the title, appears in
+ * The English chart written by the Research agent. Kept only when every value, target, second value and scale maximum,
+ * every date, every node name of a network, and every number written inside a label, a series name or the title, appears in
  * `sourceText` (the cited items plus the draft). Beyond that, a chart must make sense for its type.
  */
 export function groundChart(chart: ChartData | null | undefined, sourceText: string, nowMs: number = Date.now()): ChartData | null {
   if (!chart) return null;
   const known = new Set(numberTokens(sourceText).map(canon));
-  const stated = (n: number): boolean => known.has(canon(String(Math.abs(n))));
-  const timeline = chart.type === 'timeline';
+  const stated = (n: number | null | undefined): boolean => n != null && known.has(canon(String(Math.abs(n))));
+  const lowerText = sourceText.toLowerCase();
   const nowYear = new Date(nowMs).getUTCFullYear();
 
   const labels = new Set<string>();
   for (const item of chart.items) {
-    if (timeline) {
-      if (!item.date || !dateStated(item.date, sourceText, known, nowYear)) return null; // a date the sources never state
-    } else if (!stated(item.value)) return null; // a value the sources never state
+    switch (chart.type) {
+      case 'timeline':
+        if (!item.date || !dateStated(item.date, sourceText, known, nowYear)) return null; // a date the sources never state
+        break;
+      case 'gantt':
+        if (!item.date || !item.end || !dateStated(item.date, sourceText, known, nowYear) || !dateStated(item.end, sourceText, known, nowYear)) return null;
+        break;
+      case 'network':
+        if (!nameStated(item.label, lowerText)) return null; // an organisation or person the sources never name
+        break;
+      case 'grouped':
+      case 'stacked':
+        if (!(item.values ?? []).every((v) => stated(v))) return null;
+        break;
+      case 'slope':
+        if (!stated(item.value) || !stated(item.to)) return null;
+        break;
+      default:
+        if (!stated(item.value)) return null; // a value the sources never state
+    }
     if (item.target != null && !stated(item.target)) return null;
     labels.add(item.label.toLowerCase());
   }
   if (chart.max != null && !stated(chart.max)) return null;
   if (labels.size !== chart.items.length) return null; // duplicate labels
-  for (const text of [chart.title, chart.unit, ...chart.items.map((i) => i.label)]) {
+  for (const text of [chart.title, chart.unit, ...chart.items.map((i) => i.label), ...(chart.series ?? []), ...(chart.links ?? []).map((l) => l.label)]) {
     if (!numberTokens(text).every((n) => known.has(canon(n)))) return null; // an invented year or figure
   }
 
@@ -67,6 +90,7 @@ export function groundChart(chart: ChartData | null | undefined, sourceText: str
       break;
     }
     case 'donut':
+    case 'pie':
       if (percent && total > 100.5) return null; // shares of a whole cannot exceed it
       break;
     case 'radar':
@@ -104,15 +128,22 @@ export function groundTranslatedCharts(en: ChartData[], ka: ChartData[]): ChartD
 }
 
 /**
- * The Georgian chart written by the Translator. Same type, scale, items in the same order,
- * identical values and targets, and any digits inside labels or the title unchanged.
+ * The Georgian chart written by the Translator. Same type, scale, items in the same order, the same links between them,
+ * identical values, dates and targets, and any digits inside labels, series names or the title unchanged.
  */
 export function groundTranslatedChart(en: ChartData, ka: ChartData | null | undefined): ChartData | null {
   if (!ka || ka.type !== en.type || (ka.max ?? null) !== (en.max ?? null) || ka.items.length !== en.items.length) return null;
   if (!digitsPreserved(en.title, ka.title)) return null;
+  const enSeries = en.series ?? [];
+  const kaSeries = ka.series ?? [];
+  if (enSeries.length !== kaSeries.length || enSeries.some((x, i) => !digitsPreserved(x, kaSeries[i] ?? ''))) return null;
+  const enLinks = en.links ?? [];
+  const kaLinks = ka.links ?? [];
+  if (enLinks.length !== kaLinks.length || enLinks.some((l, i) => l.from !== kaLinks[i]?.from || l.to !== kaLinks[i]?.to || !digitsPreserved(l.label, kaLinks[i]?.label ?? ''))) return null;
   for (const [i, item] of en.items.entries()) {
     const k = ka.items[i];
-    if (!k || k.value !== item.value || (k.date ?? null) !== (item.date ?? null) || (k.target ?? null) !== (item.target ?? null) || !digitsPreserved(item.label, k.label)) return null;
+    if (!k || k.value !== item.value || (k.to ?? null) !== (item.to ?? null) || (k.date ?? null) !== (item.date ?? null) || (k.end ?? null) !== (item.end ?? null) || (k.target ?? null) !== (item.target ?? null)) return null;
+    if (JSON.stringify(k.values ?? null) !== JSON.stringify(item.values ?? null) || !digitsPreserved(item.label, k.label)) return null;
   }
   return ka;
 }
