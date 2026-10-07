@@ -60,7 +60,8 @@ describe('end-to-end pipeline: Research -> Edit -> Fact-Check -> Publish/Reject'
     const used = rows<{ n: number }>(env, `SELECT COUNT(*) n FROM feed_items WHERE article_id IS NOT NULL`)[0]?.n;
     const pooled = rows<{ title: string }>(env, `SELECT title FROM feed_items WHERE article_id IS NULL ORDER BY title`).map((x) => x.title);
     expect(used).toBe(3);
-    expect(pooled).toEqual(['A single-source gadget review nobody else covered', 'Show HN: a social-only rumour about a merger']);
+    // Hacker News has no feed any more (it answers HTTP 419), so its rumour is never collected
+    expect(pooled).toEqual(['A single-source gadget review nobody else covered']);
 
     // audit trail: breakdown stored for every fact-check decision, feed failures logged
     const audits = rows<{ detail: string }>(env, `SELECT detail FROM pipeline_events WHERE stage='fact_check' AND outcome='ok'`);
@@ -225,7 +226,7 @@ describe('orchestration', () => {
     stubFeeds({});
     const raw = env.DB.raw;
     const add = raw.prepare(`INSERT INTO pipeline_runs (run_id, scope, trigger, started_at, status, stats) VALUES (?, 'collect', 'cron', ?, 'running', ?)`);
-    add.run('dead', new Date(NOW - 6 * 60_000).toISOString(), JSON.stringify({ progress: 'collect 6/14 feeds, 31 new items' }));
+    add.run('dead', new Date(NOW - 20 * 60_000).toISOString(), JSON.stringify({ progress: 'collect 6/14 feeds, 31 new items' }));
     add.run('live', new Date(NOW - 60_000).toISOString(), JSON.stringify({ progress: 'collect started' }));
     await runPipeline(env, { trigger: 'cron', stages: ['edit'], now: NOW, llm: null });
     const [dead, live] = ['dead', 'live'].map((id) => rows<{ status: string; stats: string; finished_at: string | null }>(env, `SELECT status, stats, finished_at FROM pipeline_runs WHERE run_id = '${id}'`)[0]);

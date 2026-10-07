@@ -10,9 +10,9 @@ describe('time', () => {
     }
   });
 
-  it('floors to the 5-minute cron slot', () => {
+  it('floors to the 20-minute cron slot', () => {
     const t = Date.parse('2026-10-03T13:17:42Z');
-    expect(new Date(floorToSlot(t)).toISOString()).toBe('2026-10-03T13:15:00.000Z');
+    expect(new Date(floorToSlot(t)).toISOString()).toBe('2026-10-03T13:00:00.000Z');
     expect(new Date(nextSlot(t)).toISOString()).toBe('2026-10-03T13:20:00.000Z');
   });
 
@@ -21,18 +21,18 @@ describe('time', () => {
     expect(tbilisiDate(Date.parse('2026-10-03T20:00:00Z'))).toBe('2026-10-04');
   });
 
-  it('parses HH:MM and snaps down to a 5-minute slot', () => {
-    expect(parseSlotMinute('17:15')).toBe(17 * 60 + 15);
-    expect(parseSlotMinute('17:19')).toBe(17 * 60 + 15);
+  it('parses HH:MM and snaps down to a 20-minute slot', () => {
+    expect(parseSlotMinute('17:20')).toBe(17 * 60 + 20);
+    expect(parseSlotMinute('17:39')).toBe(17 * 60 + 20);
     expect(parseSlotMinute('00:00')).toBe(0);
-    expect(parseSlotMinute('23:59')).toBe(23 * 60 + 55);
+    expect(parseSlotMinute('23:59')).toBe(23 * 60 + 40);
     for (const bad of ['', '24:00', '9:30', '12:60', 'ab:cd', '12:3']) expect(parseSlotMinute(bad)).toBeNull();
   });
 
   it('converts a Tbilisi slot to a UTC half-open range', () => {
-    expect(slotRangeUtc('2026-10-03', 17 * 60 + 15)).toEqual({ start: '2026-10-03T13:15:00.000Z', end: '2026-10-03T13:20:00.000Z' });
+    expect(slotRangeUtc('2026-10-03', 17 * 60 + 20)).toEqual({ start: '2026-10-03T13:20:00.000Z', end: '2026-10-03T13:40:00.000Z' });
     // 01:30 Tbilisi is the previous UTC day
-    expect(slotRangeUtc('2026-10-03', 90)).toEqual({ start: '2026-10-02T21:30:00.000Z', end: '2026-10-02T21:35:00.000Z' });
+    expect(slotRangeUtc('2026-10-03', 90)).toEqual({ start: '2026-10-02T21:30:00.000Z', end: '2026-10-02T21:50:00.000Z' });
   });
 
   it('covers a whole Tbilisi day', () => {

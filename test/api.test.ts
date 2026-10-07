@@ -95,41 +95,41 @@ describe('GET /api/articles', () => {
     expect(await ids('tab=real-estate')).toEqual([]);
   });
 
-  describe('5-minute time search (Asia/Tbilisi = UTC+4)', () => {
+  describe('20-minute time search (Asia/Tbilisi = UTC+4)', () => {
     const seed = (env: Env) => {
-      pub(env, 'in-start', '2026-10-03T13:15:00.000Z'); // 17:15:00 Tbilisi
+      pub(env, 'in-start', '2026-10-03T13:00:00.000Z'); // 17:00:00 Tbilisi
       pub(env, 'in-mid', '2026-10-03T13:17:42.500Z'); //   17:17
       pub(env, 'in-end', '2026-10-03T13:19:59.999Z'); //   17:19:59
       pub(env, 'out-next', '2026-10-03T13:20:00.000Z'); // 17:20 -> next slot
-      pub(env, 'out-prev', '2026-10-03T13:14:59.999Z'); // 17:14
+      pub(env, 'out-prev', '2026-10-03T12:59:59.999Z'); // 16:59
       pub(env, 'other-day', '2026-10-02T13:16:00.000Z'); // 17:16 on the previous day
       pub(env, 'morning', '2026-10-03T05:30:00.000Z'); //   09:30
       pub(env, 'late-night', '2026-10-03T19:57:00.000Z'); // 23:57
       pub(env, 'after-midnight', '2026-10-03T20:02:00.000Z'); // 00:02 next Tbilisi day
     };
 
-    it('matches the half-open window [HH:MM, HH:MM+5) on any day', async () => {
+    it('matches the half-open window [HH:MM, HH:MM+20) on any day', async () => {
       const env = makeEnv();
       seed(env);
-      const { body } = await get(env, '/api/articles?time=17:15');
-      expect(body.filter).toEqual({ date: null, time: '17:15' });
+      const { body } = await get(env, '/api/articles?time=17:00');
+      expect(body.filter).toEqual({ date: null, time: '17:00' });
       expect(body.articles.map((a: any) => a.id).sort()).toEqual(['in-end', 'in-mid', 'in-start', 'other-day']);
     });
 
     it('snaps an off-grid minute down to its slot', async () => {
       const env = makeEnv();
       seed(env);
-      const { body } = await get(env, '/api/articles?time=17:18');
-      expect(body.filter.time).toBe('17:15');
+      const { body } = await get(env, '/api/articles?time=17:19');
+      expect(body.filter.time).toBe('17:00');
       expect(body.articles).toHaveLength(4);
     });
 
     it('combines with a Tbilisi calendar date', async () => {
       const env = makeEnv();
       seed(env);
-      const d3 = await get(env, '/api/articles?time=17:15&date=2026-10-03');
+      const d3 = await get(env, '/api/articles?time=17:00&date=2026-10-03');
       expect(d3.body.articles.map((a: any) => a.id).sort()).toEqual(['in-end', 'in-mid', 'in-start']);
-      const d2 = await get(env, '/api/articles?time=17:15&date=2026-10-02');
+      const d2 = await get(env, '/api/articles?time=17:00&date=2026-10-02');
       expect(d2.body.articles.map((a: any) => a.id)).toEqual(['other-day']);
     });
 
